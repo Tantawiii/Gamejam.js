@@ -1,0 +1,19 @@
+{
+  "name": "gamedevjs-jam-2026-machines",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Gamedev.js Jam 2026 — theme: Machines! (HTML5, no browser plugins)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "phaser": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.7.2",
+    "vite": "^6.0.3"
+  }
+}
