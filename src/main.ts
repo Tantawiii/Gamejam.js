@@ -1,4 +1,5 @@
 import * as Phaser from 'phaser';
+import { GameOverScene } from './scenes/GameOverScene';
 import { MainScene } from './scenes/MainScene';
 
 const parent = document.getElementById('game');
@@ -20,5 +21,5 @@ new Phaser.Game({
     default: 'arcade',
     arcade: { gravity: { x: 0, y: 0 }, debug: false },
   },
-  scene: [MainScene],
+  scene: [MainScene, GameOverScene],
 });
