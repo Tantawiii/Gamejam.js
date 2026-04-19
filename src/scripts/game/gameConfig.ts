@@ -77,7 +77,7 @@ export const MAIN_PLAYER_VISUAL = {
 } as const;
 
 export const MAIN_ENEMY_SWARM = {
-  spawnIntervalMs: 2200,
+  spawnIntervalMs: 1200, // Every 1.2 seconds
   speed: 62,
   radius: 9,
   maxEnemies: 28,
@@ -86,6 +86,7 @@ export const MAIN_ENEMY_SWARM = {
   fillColor: 0xd73a49,
   strokeColor: 0xffb1ba,
   depth: 8,
+  maxHealth: 1,
   trainContactDamage: 10,
   trainContactCooldownMs: 500,
   coalDropOnKill: 6,

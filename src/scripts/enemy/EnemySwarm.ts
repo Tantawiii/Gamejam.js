@@ -1,7 +1,8 @@
 import * as Phaser from 'phaser';
-import { pushCircleOutOfCenteredRect } from '../player/circleRectPushOut';
 import type { TrainController } from '../train/TrainController';
-import { circleIntersectsCenteredRect } from './circleRectIntersect';
+import { Enemy } from './Enemy';
+import { BasicEnemy } from './BasicEnemy';
+import { BombEnemy } from './BombEnemy';
 
 export type EnemySwarmOptions = {
   spawnIntervalMs: number;
@@ -13,29 +14,27 @@ export type EnemySwarmOptions = {
   fillColor: number;
   strokeColor: number;
   depth: number;
+  maxHealth: number;
   trainContactDamage: number;
   trainContactCooldownMs: number;
   playerRadius: number;
   onPlayerCollide?: () => void;
   onTrainDamagedByEnemy?: () => void;
   onEnemyDestroyed?: (x: number, y: number) => void;
-};
-
-export type EnemyEntry = {
-  sprite: Phaser.GameObjects.Arc;
-  speed: number;
-  trainHitCooldownMs: number;
+  // New: variant spawning
+  enableVariants?: boolean;
 };
 
 /**
- * Chases train or player (whichever is closer). Damages the train on hull overlap with cooldown.
+ * Manages a swarm of enemies. Currently spawns BasicEnemy instances.
+ * Can be extended to spawn different enemy types.
  */
 export class EnemySwarm {
   private readonly scene: Phaser.Scene;
   private readonly train: TrainController;
   private readonly getPlayerWorld: () => { x: number; y: number };
   private readonly opts: EnemySwarmOptions;
-  readonly enemies: EnemyEntry[] = [];
+  readonly enemies: Enemy[] = [];
   private spawnAcc = 0;
 
   constructor(
@@ -56,11 +55,13 @@ export class EnemySwarm {
   ): { x: number; y: number } | null {
     let best: { x: number; y: number; d: number } | null = null;
     for (const e of this.enemies) {
-      const dx = e.sprite.x - wx;
-      const dy = e.sprite.y - wy;
+      if (!e.isAlive()) continue;
+      const pos = e.getPosition();
+      const dx = pos.x - wx;
+      const dy = pos.y - wy;
       const d = dx * dx + dy * dy;
       if (!best || d < best.d) {
-        best = { x: e.sprite.x, y: e.sprite.y, d };
+        best = { x: pos.x, y: pos.y, d };
       }
     }
     return best ? { x: best.x, y: best.y } : null;
@@ -70,23 +71,20 @@ export class EnemySwarm {
     bx: number,
     by: number,
     bulletRadius: number,
+    bulletDamage: number = 1,
   ): boolean {
-    const o = this.opts;
-    const hitR = bulletRadius + o.radius;
-    const hitRSq = hitR * hitR;
-    for (let i = 0; i < this.enemies.length; i++) {
+    let i = 0;
+    while (i < this.enemies.length) {
       const e = this.enemies[i];
-      if (!e) continue;
-      const dx = e.sprite.x - bx;
-      const dy = e.sprite.y - by;
-      if (dx * dx + dy * dy <= hitRSq) {
-        const sx = e.sprite.x;
-        const sy = e.sprite.y;
-        e.sprite.destroy();
-        this.enemies.splice(i, 1);
-        o.onEnemyDestroyed?.(sx, sy);
+      if (e && e.isAlive() && e.canBeHitByBullet(bx, by, bulletRadius)) {
+        const wasDestroyed = e.takeDamage(bulletDamage);
+        if (wasDestroyed) {
+          e.destroy(this.opts.onEnemyDestroyed);
+          this.enemies.splice(i, 1);
+        }
         return true;
       }
+      i++;
     }
     return false;
   }
@@ -102,89 +100,42 @@ export class EnemySwarm {
       this.spawnOne();
     }
 
-    const dt = deltaMs / 1000;
-    const tx = this.train.body.x;
-    const ty = this.train.body.y;
-    const { x: px, y: py } = this.getPlayerWorld();
     const hulls = this.train.getHullRects();
 
-    for (const e of this.enemies) {
-      const s = e.sprite;
-      const dTx = tx - s.x;
-      const dTy = ty - s.y;
-      const dPx = px - s.x;
-      const dPy = py - s.y;
-      const dT = dTx * dTx + dTy * dTy;
-      const dP = dPx * dPx + dPy * dPy;
-      const useTrain = dT <= dP;
-      const gx = useTrain ? dTx : dPx;
-      const gy = useTrain ? dTy : dPy;
-      const len = Math.hypot(gx, gy);
-      if (len > 1e-6) {
-        s.setPosition(
-          s.x + (gx / len) * e.speed * dt,
-          s.y + (gy / len) * e.speed * dt,
-        );
-      }
-
-      e.trainHitCooldownMs = Math.max(0, e.trainHitCooldownMs - deltaMs);
-
-      let dealtTrainDamage = false;
-      for (const tb of hulls) {
-        if (
-          !circleIntersectsCenteredRect(
-            s.x,
-            s.y,
-            o.radius,
-            tb.x,
-            tb.y,
-            tb.width,
-            tb.height,
-          )
-        ) {
-          continue;
-        }
-
-        if (!dealtTrainDamage && e.trainHitCooldownMs <= 0) {
-          dealtTrainDamage = true;
-          this.train.takeDamage(o.trainContactDamage);
-          e.trainHitCooldownMs = o.trainContactCooldownMs;
-          o.onTrainDamagedByEnemy?.();
-        }
-        const out = pushCircleOutOfCenteredRect(
-          s.x,
-          s.y,
-          o.radius,
-          tb.x,
-          tb.y,
-          tb.width,
-          tb.height,
-        );
-        s.setPosition(out.x, out.y);
+    // Update living enemies and remove dead ones
+    let i = 0;
+    while (i < this.enemies.length) {
+      const e = this.enemies[i];
+      if (e && e.isAlive()) {
+        e.update(deltaMs);
+        e.handleTrainCollision(hulls, o.onTrainDamagedByEnemy);
+        i++;
+      } else {
+        // Remove dead enemies
+        this.enemies.splice(i, 1);
       }
     }
 
-    this.checkPlayerCollision();
+    // TODO: Re-enable player collision when implementing player mechanics
+    // this.checkPlayerCollision();
   }
 
-  private checkPlayerCollision(): void {
-    const cb = this.opts.onPlayerCollide;
-    if (!cb) return;
+  // TODO: Re-enable when implementing player mechanics
+  // private checkPlayerCollision(): void {
+  //   const cb = this.opts.onPlayerCollide;
+  //   if (!cb) return;
 
-    const { x: px, y: py } = this.getPlayerWorld();
-    const pr = this.opts.playerRadius;
-    const hitR = this.opts.radius + pr;
-    const hitRSq = hitR * hitR;
+  //   const { x: px, y: py } = this.getPlayerWorld();
+  //   const pr = this.opts.playerRadius;
 
-    for (const e of this.enemies) {
-      const dx = e.sprite.x - px;
-      const dy = e.sprite.y - py;
-      if (dx * dx + dy * dy <= hitRSq) {
-        cb();
-        return;
-      }
-    }
-  }
+  //   for (const e of this.enemies) {
+  //     if (!e.isAlive()) continue;
+  //     if (e.checkPlayerCollision(px, py, pr)) {
+  //       cb();
+  //       return;
+  //     }
+  //   }
+  // }
 
   private spawnOne(): void {
     const o = this.opts;
@@ -194,15 +145,106 @@ export class EnemySwarm {
     const dist = Phaser.Math.FloatBetween(o.spawnRadiusMin, o.spawnRadiusMax);
     const x = cx + Math.cos(ang) * dist;
     const y = cy + Math.sin(ang) * dist;
-    const sprite = this.scene.add.circle(x, y, o.radius, o.fillColor, 1);
-    sprite.setStrokeStyle(2, o.strokeColor);
-    sprite.setDepth(o.depth);
-    this.enemies.push({ sprite, speed: o.speed, trainHitCooldownMs: 0 });
+
+    // Choose enemy variant
+    let enemyConfig: {
+      radius: number;
+      maxHealth: number;
+      fillColor: number;
+      strokeColor: number;
+      trainContactDamage: number;
+    };
+    let enemyType: 'basic' | 'bomb' = 'basic';
+
+    if (o.enableVariants) {
+      // Randomly choose variant (0 = normal, 1 = tough, 2 = bomb)
+      const variant = Phaser.Math.Between(0, 2);
+      if (variant === 0) {
+        // Normal enemy (health 50, red)
+        enemyConfig = {
+          radius: o.radius,
+          maxHealth: 50,
+          fillColor: o.fillColor,
+          strokeColor: o.strokeColor,
+          trainContactDamage: o.trainContactDamage,
+        };
+        enemyType = 'basic';
+      } else if (variant === 1) {
+        // Tough enemy (health 100, orange, bigger, more damage)
+        enemyConfig = {
+          radius: o.radius * 1.2, // 20% bigger
+          maxHealth: 100,
+          fillColor: 0xffa500, // Orange
+          strokeColor: 0xffd700, // Gold stroke
+          trainContactDamage: 30,
+        };
+        enemyType = 'basic';
+      } else {
+        // Bomb enemy (health 30, purple, explodes for 100 damage)
+        enemyConfig = {
+          radius: o.radius * 0.8, // Smaller
+          maxHealth: 30,
+          fillColor: 0x800080, // Purple
+          strokeColor: 0xff00ff, // Magenta stroke
+          trainContactDamage: 0, // No contact damage
+        };
+        enemyType = 'bomb';
+      }
+    } else {
+      // Default enemy
+      enemyConfig = {
+        radius: o.radius,
+        maxHealth: o.maxHealth,
+        fillColor: o.fillColor,
+        strokeColor: o.strokeColor,
+        trainContactDamage: o.trainContactDamage,
+      };
+      enemyType = 'basic';
+    }
+
+    let enemy: Enemy;
+    if (enemyType === 'bomb') {
+      enemy = new BombEnemy(
+        this.scene,
+        this.train,
+        this.getPlayerWorld,
+        x,
+        y,
+        enemyConfig.radius,
+        o.speed,
+        enemyConfig.fillColor,
+        enemyConfig.strokeColor,
+        o.depth,
+        enemyConfig.maxHealth,
+        enemyConfig.trainContactDamage,
+        o.trainContactCooldownMs,
+        100, // Explosion damage
+        enemyConfig.radius * 2, // Explosion radius
+      );
+    } else {
+      enemy = new BasicEnemy(
+        this.scene,
+        this.train,
+        this.getPlayerWorld,
+        x,
+        y,
+        enemyConfig.radius,
+        o.speed,
+        enemyConfig.fillColor,
+        enemyConfig.strokeColor,
+        o.depth,
+        enemyConfig.maxHealth,
+        enemyConfig.trainContactDamage,
+        o.trainContactCooldownMs,
+      );
+    }
+
+    this.enemies.push(enemy);
   }
 
   destroy(): void {
     for (const e of this.enemies) {
-      e.sprite.destroy();
+      e.destroy();
     }
     this.enemies.length = 0;
   }

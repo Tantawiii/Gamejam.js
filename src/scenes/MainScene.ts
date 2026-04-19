@@ -112,9 +112,10 @@ export class MainScene extends Phaser.Scene {
       {
         ...MAIN_ENEMY_SWARM,
         playerRadius: MAIN_PLAYER_VISUAL.radius,
-        onPlayerCollide: () => {
-          this.scene.start('GameOverScene');
-        },
+        // TODO: Re-enable when implementing player mechanics
+        // onPlayerCollide: () => {
+        //   this.scene.start('GameOverScene');
+        // },
         onTrainDamagedByEnemy: () => {
           const s = MAIN_CAMERA_SHAKE_ON_TRAIN_HIT;
           this.cameras.main.shake(s.durationMs, s.intensity, true);
@@ -122,6 +123,7 @@ export class MainScene extends Phaser.Scene {
         onEnemyDestroyed: (x, y) => {
           this.coalPickups?.spawn(x, y, MAIN_ENEMY_SWARM.coalDropOnKill);
         },
+        enableVariants: true, // Enable enemy variants
       },
     );
 

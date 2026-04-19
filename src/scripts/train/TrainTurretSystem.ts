@@ -148,7 +148,7 @@ export class TrainTurretSystem {
       const ny = b.graphic.y + b.vy * dt;
       b.graphic.setPosition(nx, ny);
 
-      const hit = enemies.tryHitEnemyWithBullet(nx, ny, this.bulletRadius);
+      const hit = enemies.tryHitEnemyWithBullet(nx, ny, this.bulletRadius, 30);
       if (hit) {
         b.graphic.destroy();
         this.bullets.splice(i, 1);
