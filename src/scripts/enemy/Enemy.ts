@@ -12,7 +12,8 @@ export abstract class Enemy implements Damageable {
   protected readonly scene: Phaser.Scene;
   protected readonly train: TrainController;
   protected readonly getPlayerWorld: () => { x: number; y: number };
-  protected sprite: Phaser.GameObjects.Arc;
+  protected sprite: Phaser.GameObjects.Image | Phaser.GameObjects.Arc;
+  protected readonly collisionRadius: number;
   protected speed: number;
   protected trainHitCooldownMs: number = 0;
   protected currentHealth: number;
@@ -36,11 +37,20 @@ export abstract class Enemy implements Damageable {
     this.train = train;
     this.getPlayerWorld = getPlayerWorld;
     this.speed = speed;
+    this.collisionRadius = radius;
     this.maxHealth = maxHealth;
     this.currentHealth = maxHealth;
 
-    this.sprite = scene.add.circle(x, y, radius, fillColor, 1);
-    this.sprite.setStrokeStyle(2, strokeColor);
+    if (scene.textures.exists('NORMAL_ENEMY')) {
+      const enemyImage = scene.add.image(x, y, 'NORMAL_ENEMY');
+      enemyImage.setDisplaySize(radius * 10, radius * 10);
+      enemyImage.setTint(fillColor);
+      this.sprite = enemyImage;
+    } else {
+      const enemyCircle = scene.add.circle(x, y, radius, fillColor, 1);
+      enemyCircle.setStrokeStyle(2, strokeColor);
+      this.sprite = enemyCircle;
+    }
     this.sprite.setDepth(depth);
 
     // Create health bar

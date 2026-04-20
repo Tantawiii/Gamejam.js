@@ -7,6 +7,7 @@ import { circleIntersectsCenteredRect } from './circleRectIntersect';
  * Bomb enemy that explodes on contact with train, dealing high damage but dying in the process.
  */
 export class BombEnemy extends Enemy {
+  private readonly radius: number;
   private readonly explosionDamage: number;
   // @ts-ignore - Reserved for future area damage implementation
   private readonly _explosionRadius: number;
@@ -41,6 +42,7 @@ export class BombEnemy extends Enemy {
       depth,
       maxHealth,
     );
+    this.radius = radius;
     this.explosionDamage = explosionDamage;
     this._explosionRadius = _explosionRadius;
   }
@@ -76,7 +78,7 @@ export class BombEnemy extends Enemy {
   }
 
   getRadius(): number {
-    return this.sprite?.radius ?? 0;
+    return this.radius;
   }
 
   getTrainContactDamage(): number {

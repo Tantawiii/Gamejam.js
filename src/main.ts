@@ -1,6 +1,8 @@
 import * as Phaser from 'phaser';
 import { GameOverScene } from './scenes/GameOverScene';
+import { MainMenuScene } from './scenes/MainMenuScene';
 import { MainScene } from './scenes/MainScene';
+import { PreloaderScene } from './scenes/PreloaderScene';
 
 const parent = document.getElementById('game');
 if (!parent) {
@@ -21,5 +23,5 @@ new Phaser.Game({
     default: 'arcade',
     arcade: { gravity: { x: 0, y: 0 }, debug: false },
   },
-  scene: [MainScene, GameOverScene],
+  scene: [PreloaderScene, MainMenuScene, MainScene, GameOverScene],
 });
