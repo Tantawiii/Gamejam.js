@@ -114,6 +114,7 @@ export const MAIN_TURRET_SYSTEM = {
   bulletColor: 0xffe066,
   gunLength: 22,
   gunThickness: 7,
+  firingRange: 500, // Only fire at enemies within 500 pixels
 } as const;
 
 /** HUD bars (screen space). */

@@ -5,8 +5,40 @@ import { circleIntersectsCenteredRect } from './circleRectIntersect';
 import { Damageable } from './Damageable';
 
 /**
- * Abstract base class for all enemy types.
- * Defines common enemy behavior and interface.
+ * ENEMY.TS - Abstract Base Class for All Enemy Types
+ * 
+ * PURPOSE:
+ * This is the foundational class that all enemy variants (BasicEnemy, BombEnemy, ChunkyEnemy) 
+ * inherit from. It provides the core enemy framework including health management, collision 
+ * detection with trains, rendering, and common enemy mechanics.
+ * 
+ * KEY RESPONSIBILITIES:
+ * 1. Health System - Track enemy health with takeDamage() and manage destruction when health reaches 0
+ * 2. Visual Rendering - Create and manage circular sprite with health bar display
+ * 3. Train Collision Detection - Handle collision with train hulls and trigger damage/pushback
+ * 4. Player Collision Detection - Detect when enemy touches the player (for future player damage)
+ * 5. Damage To Bullets - Determine when bullets hit this enemy
+ * 6. Abstract Methods - Define interface that subclasses must implement (update, getRadius, etc.)
+ * 
+ * IMPORTANT PROPERTIES:
+ * - sprite: The visual circle representation of the enemy (created in Phaser)
+ * - healthBar: Graphics object showing health as a bar above the enemy
+ * - currentHealth / maxHealth: Track damage taken and total health pool
+ * - trainHitCooldownMs: Prevents the same collision from dealing damage repeatedly per frame
+ * - speed: How fast the enemy moves toward targets (pixels per second)
+ * 
+ * COLLISION & DAMAGE FLOW:
+ * 1. Enemy hits train hull → circleIntersectsCenteredRect() returns true
+ * 2. handleTrainCollision() checks cooldown and deals damage if ready
+ * 3. pushCircleOutOfCenteredRect() pushes enemy away to prevent overlap
+ * 4. trainHitCooldownMs is reset to prevent spam damage
+ * 5. When health reaches 0, enemy sprites are destroyed
+ * 
+ * ABSTRACT METHODS (must be implemented by subclasses):
+ * - update(deltaMs): Called every frame to handle movement, collision checks, special behavior
+ * - getRadius(): Return the circular collision radius of this enemy
+ * - getTrainContactDamage(): Damage dealt to train when colliding
+ * - getTrainContactCooldownMs(): Milliseconds between train damage hits
  */
 export abstract class Enemy implements Damageable {
   protected readonly scene: Phaser.Scene;

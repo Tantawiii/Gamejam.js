@@ -3,6 +3,7 @@ import type { TrainController } from '../train/TrainController';
 import { Enemy } from './Enemy';
 import { BasicEnemy } from './BasicEnemy';
 import { BombEnemy } from './BombEnemy';
+import { ChunkyEnemy } from './ChunkyEnemy';
 
 export type EnemySwarmOptions = {
   spawnIntervalMs: number;
@@ -154,11 +155,11 @@ export class EnemySwarm {
       strokeColor: number;
       trainContactDamage: number;
     };
-    let enemyType: 'basic' | 'bomb' = 'basic';
+    let enemyType: 'basic' | 'bomb' | 'chunky' = 'basic';
 
     if (o.enableVariants) {
-      // Randomly choose variant (0 = normal, 1 = tough, 2 = bomb)
-      const variant = Phaser.Math.Between(0, 2);
+      // Randomly choose variant (0 = normal, 1 = tough, 2 = bomb, 3 = chunky)
+      const variant = Phaser.Math.Between(0, 3);
       if (variant === 0) {
         // Normal enemy (health 50, red)
         enemyConfig = {
@@ -179,7 +180,7 @@ export class EnemySwarm {
           trainContactDamage: 30,
         };
         enemyType = 'basic';
-      } else {
+      } else if (variant === 2) {
         // Bomb enemy (health 30, purple, explodes for 100 damage)
         enemyConfig = {
           radius: o.radius * 0.8, // Smaller
@@ -189,6 +190,16 @@ export class EnemySwarm {
           trainContactDamage: 0, // No contact damage
         };
         enemyType = 'bomb';
+      } else {
+        // Chunky enemy (health 300, brown, very big, slow)
+        enemyConfig = {
+          radius: o.radius * 1.5, // 50% bigger
+          maxHealth: 300,
+          fillColor: 0x8b4513, // Brown
+          strokeColor: 0xd2691e, // Chocolate stroke
+          trainContactDamage: 20,
+        };
+        enemyType = 'chunky';
       }
     } else {
       // Default enemy
@@ -220,6 +231,22 @@ export class EnemySwarm {
         o.trainContactCooldownMs,
         100, // Explosion damage
         enemyConfig.radius * 2, // Explosion radius
+      );
+    } else if (enemyType === 'chunky') {
+      enemy = new ChunkyEnemy(
+        this.scene,
+        this.train,
+        this.getPlayerWorld,
+        x,
+        y,
+        enemyConfig.radius,
+        o.speed * 0.5, // 50% slower than normal
+        enemyConfig.fillColor,
+        enemyConfig.strokeColor,
+        o.depth,
+        enemyConfig.maxHealth,
+        enemyConfig.trainContactDamage,
+        o.trainContactCooldownMs,
       );
     } else {
       enemy = new BasicEnemy(

@@ -25,6 +25,7 @@ export class TrainTurretSystem {
   private readonly gunLength: number;
   private readonly gunThickness: number;
   private readonly depth: number;
+  private readonly firingRange: number;
 
   constructor(
     scene: Phaser.Scene,
@@ -37,6 +38,7 @@ export class TrainTurretSystem {
       gunLength: number;
       gunThickness: number;
       depth: number;
+      firingRange?: number;
     },
   ) {
     this.scene = scene;
@@ -48,6 +50,7 @@ export class TrainTurretSystem {
     this.gunLength = options.gunLength;
     this.gunThickness = options.gunThickness;
     this.depth = options.depth;
+    this.firingRange = options.firingRange ?? 500; // Default 500 pixel range
   }
 
   rebuildFromTrain(train: TrainController): void {
@@ -91,6 +94,13 @@ export class TrainTurretSystem {
       this.rebuildFromTrain(train);
     }
 
+    // Get camera bounds
+    const cam = this.scene.cameras.main;
+    const camX = cam.worldView.x;
+    const camY = cam.worldView.y;
+    const camW = cam.worldView.width;
+    const camH = cam.worldView.height;
+
     for (let i = 0; i < this.guns.length; i++) {
       const gun = this.guns[i];
       const m = mounts[i];
@@ -102,10 +112,24 @@ export class TrainTurretSystem {
         continue;
       }
 
-      const ang = Math.atan2(target.y - m.y, target.x - m.x);
+      const dx = target.x - m.x;
+      const dy = target.y - m.y;
+      const distance = Math.hypot(dx, dy);
+
+      const ang = Math.atan2(dy, dx);
       gun.setRotation(ang);
 
       if (!canFire) {
+        continue;
+      }
+
+      // Only fire if target is within range AND on screen
+      if (distance > this.firingRange) {
+        continue;
+      }
+
+      // Check if target is within camera bounds
+      if (target.x < camX || target.x > camX + camW || target.y < camY || target.y > camY + camH) {
         continue;
       }
 
@@ -135,6 +159,12 @@ export class TrainTurretSystem {
 
   private updateBullets(deltaMs: number, enemies: EnemySwarm): void {
     const dt = deltaMs / 1000;
+    const cam = this.scene.cameras.main;
+    const camX = cam.worldView.x;
+    const camY = cam.worldView.y;
+    const camW = cam.worldView.width;
+    const camH = cam.worldView.height;
+    
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
       if (!b) continue;
@@ -148,10 +178,14 @@ export class TrainTurretSystem {
       const ny = b.graphic.y + b.vy * dt;
       b.graphic.setPosition(nx, ny);
 
-      const hit = enemies.tryHitEnemyWithBullet(nx, ny, this.bulletRadius, 30);
-      if (hit) {
-        b.graphic.destroy();
-        this.bullets.splice(i, 1);
+      // Only hit enemies if bullet is within camera bounds
+      const isOnScreen = nx >= camX && nx <= camX + camW && ny >= camY && ny <= camY + camH;
+      if (isOnScreen) {
+        const hit = enemies.tryHitEnemyWithBullet(nx, ny, this.bulletRadius, 30);
+        if (hit) {
+          b.graphic.destroy();
+          this.bullets.splice(i, 1);
+        }
       }
     }
   }
