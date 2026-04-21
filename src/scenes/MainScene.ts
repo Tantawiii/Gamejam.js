@@ -1,12 +1,11 @@
 import * as Phaser from 'phaser';
 import { CardPityState } from '../scripts/card/CardPityState';
 import { configureGameplayCamera } from '../scripts/camera/configureGameplayCamera';
-import { EnemySwarm } from '../scripts/enemy/EnemySwarm';
+import { WaveSystem } from '../scripts/waves/WaveSystem';
 import { DownwardParallaxBackground } from '../scripts/parallax/DownwardParallaxBackground';
 import {
   MAIN_CAMERA_SHAKE_ON_TRAIN_HIT,
   MAIN_COAL_PICKUP,
-  MAIN_ENEMY_SWARM,
   MAIN_PARALLAX_LAYERS,
   MAIN_PLAYER_SPAWN_OFFSET,
   MAIN_PLAYER_VISUAL,
@@ -34,7 +33,7 @@ export class MainScene extends Phaser.Scene {
   private player?: PlayerController;
   private riding?: TrainRidingController;
   private turrets?: TrainTurretSystem;
-  private enemies?: EnemySwarm;
+  private waves?: WaveSystem;
   private coalPickups?: CoalPickupManager;
   private hud?: GameplayHud;
 
@@ -102,29 +101,30 @@ export class MainScene extends Phaser.Scene {
 
     this.coalPickups = new CoalPickupManager(this, MAIN_COAL_PICKUP);
 
-    this.enemies = new EnemySwarm(
+    this.waves = new WaveSystem(
       this,
       train,
       () => ({
         x: player.sprite.x,
         y: player.sprite.y,
       }),
+      MAIN_WORLD.width,
+      MAIN_WORLD.height,
       {
-        ...MAIN_ENEMY_SWARM,
-        playerRadius: MAIN_PLAYER_VISUAL.radius,
-        // TODO: Re-enable when implementing player mechanics
-        // onPlayerCollide: () => {
-        //   this.scene.start('GameOverScene');
-        // },
-        onTrainDamagedByEnemy: () => {
-          const s = MAIN_CAMERA_SHAKE_ON_TRAIN_HIT;
-          this.cameras.main.shake(s.durationMs, s.intensity, true);
+        onWaveStarted: (waveNumber, totalEnemies) => {
+          this.hud?.onWaveStarted(waveNumber, totalEnemies);
+        },
+        onWaveCompleted: (waveNumber) => {
+          this.hud?.onWaveCompleted(waveNumber);
         },
         onEnemyDestroyed: (x, y) => {
-          this.coalPickups?.spawn(x, y, MAIN_ENEMY_SWARM.coalDropOnKill);
+          this.coalPickups?.spawn(x, y, 6);
         },
-        enableVariants: true, // Enable enemy variants
+        onEnemyDespawned: () => {
+          // Enemy went off-screen and is being respawned
+        },
       },
+      1.2, // difficultyMultiplier
     );
 
     this.turrets = new TrainTurretSystem(this, {
@@ -162,10 +162,17 @@ export class MainScene extends Phaser.Scene {
 
     this.riding?.updatePlayerMotion(delta, cam);
 
-    const enemies = this.enemies;
-    if (train && enemies) {
-      enemies.update(delta);
-      this.turrets?.update(delta, train, enemies, coalOk);
+    const waves = this.waves;
+    if (train && waves) {
+      waves.update(delta);
+      waves.updateEnemies(delta);
+      const hulls = train.getHullRects();
+      waves.updateCollisions(hulls, () => {
+        const s = MAIN_CAMERA_SHAKE_ON_TRAIN_HIT;
+        this.cameras.main.shake(s.durationMs, s.intensity, true);
+      });
+      this.turrets?.update(delta, train, waves, coalOk);
+      this.hud?.updateWaveInfo(waves);
     }
 
     const player = this.player;
