@@ -39,7 +39,7 @@ export class GameOverScene extends Phaser.Scene {
     if (kb) {
       const rKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.R);
       rKey.once('down', () => {
-        this.scene.start('MainScene');
+        this.scene.start('MainMenuScene');
       });
     }
   }
