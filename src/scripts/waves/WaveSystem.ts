@@ -55,14 +55,18 @@ export class WaveSystem {
   private spawnAcc: number = 0;
   private totalEnemiesForWave: number = 0;
   private respawnQueue: PendingEnemy[] = [];
+  private readonly enemyPools: Record<EnemyType, Enemy[]> = {
+    basic: [],
+    bomb: [],
+    chunky: [],
+  };
   
   // Between wave state
   private betweenWaveAcc: number = 0;
   
   // Config
   private enemySpawnInterval: number = 200; // ms between spawning each enemy
-  private spawnRadiusMin: number;
-  private spawnRadiusMax: number;
+  private readonly maxAliveAtOnce = 18;
 
   constructor(
     scene: Phaser.Scene,
@@ -72,16 +76,14 @@ export class WaveSystem {
     _worldHeight: number,
     callbacks: WaveSystemCallback = {},
     difficultyMultiplier: number = 1.2,
-    spawnRadiusMin: number = 320,
-    spawnRadiusMax: number = 620,
+    _spawnRadiusMin: number = 320,
+    _spawnRadiusMax: number = 620,
   ) {
     this.scene = scene;
     this.train = train;
     this.getPlayerWorld = getPlayerWorld;
     this.callbacks = callbacks;
     this.difficultyMultiplier = difficultyMultiplier;
-    this.spawnRadiusMin = spawnRadiusMin;
-    this.spawnRadiusMax = spawnRadiusMax;
 
     this.initializeWave(1);
   }
@@ -92,6 +94,9 @@ export class WaveSystem {
   private initializeWave(waveNumber: number): void {
     this.currentWave = waveNumber;
     this.currentState = 'spawning';
+    for (const e of this.waveEnemies) {
+      this.recycleEnemy(e);
+    }
     this.waveEnemies = [];
     this.pendingEnemies = [];
     this.respawnQueue = [];
@@ -134,12 +139,13 @@ export class WaveSystem {
    * Spawn a single enemy
    */
   private spawnEnemy(type: EnemyType, health: number): Enemy {
-    const cx = this.train.body.x;
-    const cy = this.train.body.y;
-    const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
-    const dist = Phaser.Math.FloatBetween(this.spawnRadiusMin, this.spawnRadiusMax);
-    const x = cx + Math.cos(ang) * dist;
-    const y = cy + Math.sin(ang) * dist;
+    const { x, y } = this.getSpawnPointAroundScreen();
+    const pooled = this.enemyPools[type].pop();
+    if (pooled) {
+      pooled.resetForSpawn(x, y, health);
+      this.waveEnemies.push(pooled);
+      return pooled;
+    }
 
     let enemy: Enemy;
     const commonRadius = 9;
@@ -207,6 +213,40 @@ export class WaveSystem {
     return enemy;
   }
 
+  private getSpawnPointAroundScreen(): { x: number; y: number } {
+    const cam = this.scene.cameras.main.worldView;
+    const margin = 80;
+    const side = Phaser.Math.Between(0, 3);
+    switch (side) {
+      case 0:
+        return {
+          x: Phaser.Math.Between(cam.x - margin, cam.right + margin),
+          y: cam.y - margin,
+        };
+      case 1:
+        return {
+          x: cam.right + margin,
+          y: Phaser.Math.Between(cam.y - margin, cam.bottom + margin),
+        };
+      case 2:
+        return {
+          x: Phaser.Math.Between(cam.x - margin, cam.right + margin),
+          y: cam.bottom + margin,
+        };
+      default:
+        return {
+          x: cam.x - margin,
+          y: Phaser.Math.Between(cam.y - margin, cam.bottom + margin),
+        };
+    }
+  }
+
+  private recycleEnemy(enemy: Enemy): void {
+    const type = this.getEnemyType(enemy);
+    enemy.deactivateForPool();
+    this.enemyPools[type].push(enemy);
+  }
+
   /**
    * Check if enemy is off-screen (despawned)
    */
@@ -267,9 +307,13 @@ export class WaveSystem {
       return;
     }
 
-    // Spawn pending enemies
+    // Spawn pending enemies gradually with alive cap
     this.spawnAcc += deltaMs;
-    while (this.pendingEnemies.length > 0 && this.spawnAcc >= this.enemySpawnInterval) {
+    while (
+      this.pendingEnemies.length > 0 &&
+      this.spawnAcc >= this.enemySpawnInterval &&
+      this.getTotalAliveEnemies() < this.maxAliveAtOnce
+    ) {
       this.spawnAcc -= this.enemySpawnInterval;
       const pending = this.pendingEnemies.shift()!;
       this.spawnEnemy(pending.type, pending.health);
@@ -295,7 +339,7 @@ export class WaveSystem {
             health: e.getCurrentHealth(),
             spawnTime: 0,
           });
-          e.destroy();
+          this.recycleEnemy(e);
           this.waveEnemies.splice(i, 1);
           this.callbacks.onEnemyDespawned?.();
         }
@@ -303,8 +347,13 @@ export class WaveSystem {
       i--;
     }
 
-    // Respawn despawned enemies
-    if (this.respawnQueue.length > 0) {
+    // Respawn despawned enemies gradually with same cap
+    if (
+      this.respawnQueue.length > 0 &&
+      this.spawnAcc >= this.enemySpawnInterval &&
+      this.getTotalAliveEnemies() < this.maxAliveAtOnce
+    ) {
+      this.spawnAcc -= this.enemySpawnInterval;
       const respawning = this.respawnQueue.shift()!;
       this.spawnEnemy(respawning.type, respawning.health);
     }
@@ -345,7 +394,10 @@ export class WaveSystem {
       if (e && e.isAlive() && e.canBeHitByBullet(bx, by, bulletRadius)) {
         const wasDestroyed = e.takeDamage(bulletDamage);
         if (wasDestroyed) {
-          e.destroy(this.callbacks.onEnemyDestroyed);
+          const type = this.getEnemyType(e);
+          e.playDeathFade(this.callbacks.onEnemyDestroyed, () => {
+            this.enemyPools[type].push(e);
+          });
           this.waveEnemies.splice(i, 1);
         }
         return true;
@@ -404,6 +456,12 @@ export class WaveSystem {
   destroy(): void {
     for (const e of this.waveEnemies) {
       e.destroy();
+    }
+    for (const type of ['basic', 'bomb', 'chunky'] as const) {
+      for (const e of this.enemyPools[type]) {
+        e.destroy();
+      }
+      this.enemyPools[type] = [];
     }
     this.waveEnemies = [];
     this.pendingEnemies = [];

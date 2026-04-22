@@ -16,6 +16,8 @@ export class CoalPickupManager {
   private readonly depth: number;
   private readonly fillColor: number;
   private readonly strokeColor: number;
+  private readonly magnetRange: number;
+  private readonly magnetSpeed: number;
 
   constructor(
     scene: Phaser.Scene,
@@ -24,6 +26,8 @@ export class CoalPickupManager {
       depth: number;
       fillColor: number;
       strokeColor: number;
+      magnetRange?: number;
+      magnetSpeed?: number;
     },
   ) {
     this.scene = scene;
@@ -31,6 +35,8 @@ export class CoalPickupManager {
     this.depth = options.depth;
     this.fillColor = options.fillColor;
     this.strokeColor = options.strokeColor;
+    this.magnetRange = options.magnetRange ?? 72;
+    this.magnetSpeed = options.magnetSpeed ?? 220;
   }
 
   spawn(x: number, y: number, value: number): void {
@@ -41,6 +47,7 @@ export class CoalPickupManager {
   }
 
   update(
+    deltaMs: number,
     playerX: number,
     playerY: number,
     playerRadius: number,
@@ -48,16 +55,28 @@ export class CoalPickupManager {
   ): void {
     const collectR = playerRadius + this.radius;
     const rSq = collectR * collectR;
+    const magnetRSq = this.magnetRange * this.magnetRange;
+    const dt = deltaMs / 1000;
 
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const p = this.pickups[i];
       if (!p) continue;
       const dx = p.sprite.x - playerX;
       const dy = p.sprite.y - playerY;
-      if (dx * dx + dy * dy <= rSq) {
+      const dSq = dx * dx + dy * dy;
+      if (dSq <= rSq) {
         train.addCoal(p.value);
         p.sprite.destroy();
         this.pickups.splice(i, 1);
+        continue;
+      }
+
+      if (dSq <= magnetRSq && dSq > 1e-6) {
+        const dist = Math.sqrt(dSq);
+        const step = Math.min(dist, this.magnetSpeed * dt);
+        const nx = p.sprite.x - (dx / dist) * step;
+        const ny = p.sprite.y - (dy / dist) * step;
+        p.sprite.setPosition(nx, ny);
       }
     }
   }

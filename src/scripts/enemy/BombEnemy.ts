@@ -155,6 +155,10 @@ export class BombEnemy extends Enemy {
     }
   }
 
+  override resetForSpawn(x: number, y: number, health: number): void {
+    super.resetForSpawn(x, y, health);
+  }
+
   getRadius(): number {
     return this.radius;
   }

@@ -10,6 +10,7 @@ export class GameOverScene extends Phaser.Scene {
 
   create(): void {
     const { width, height } = this.scale;
+    this.cameras.main.fadeIn(280, 0, 0, 0);
 
     this.add
       .text(width / 2, height * 0.38, 'GAME OVER', {
@@ -39,7 +40,10 @@ export class GameOverScene extends Phaser.Scene {
     if (kb) {
       const rKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.R);
       rKey.once('down', () => {
-        this.scene.start('MainMenuScene');
+        this.cameras.main.once('camerafadeoutcomplete', () => {
+          this.scene.start('MainMenuScene');
+        });
+        this.cameras.main.fadeOut(280, 0, 0, 0);
       });
     }
   }

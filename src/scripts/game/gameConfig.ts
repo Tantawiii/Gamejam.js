@@ -97,6 +97,8 @@ export const MAIN_COAL_PICKUP = {
   depth: 9,
   fillColor: 0x2d2a28,
   strokeColor: 0x8b7355,
+  magnetRange: 78,
+  magnetSpeed: 240,
 } as const;
 
 export const MAIN_WEAPON_VISUAL_DEPTH = 18;

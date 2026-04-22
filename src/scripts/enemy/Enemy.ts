@@ -51,6 +51,7 @@ export abstract class Enemy implements Damageable {
   protected currentHealth: number;
   protected readonly maxHealth: number;
   protected healthBar: Phaser.GameObjects.Graphics;
+  protected activeInWorld = true;
 
   constructor(
     scene: Phaser.Scene,
@@ -118,14 +119,50 @@ export abstract class Enemy implements Damageable {
     onDestroyed?.(x, y);
   }
 
+  resetForSpawn(x: number, y: number, health: number): void {
+    this.currentHealth = Math.max(1, Math.min(this.maxHealth, health));
+    this.activeInWorld = true;
+    this.sprite.setPosition(x, y);
+    this.sprite.setAlpha(1);
+    this.sprite.setVisible(true);
+    this.healthBar.setAlpha(1);
+    this.healthBar.setVisible(true);
+    this.updateHealthBarPosition();
+  }
+
+  deactivateForPool(): void {
+    this.activeInWorld = false;
+    this.currentHealth = 0;
+    this.sprite.setVisible(false);
+    this.healthBar.clear();
+    this.healthBar.setVisible(false);
+  }
+
+  playDeathFade(
+    onDestroyed?: (x: number, y: number) => void,
+    onFadeDone?: () => void,
+  ): void {
+    const x = this.sprite.x;
+    const y = this.sprite.y;
+    this.healthBar.clear();
+    this.scene.tweens.add({
+      targets: [this.sprite, this.healthBar],
+      alpha: 0,
+      duration: 220,
+      ease: 'Sine.Out',
+      onComplete: () => {
+        this.deactivateForPool();
+        onFadeDone?.();
+      },
+    });
+    onDestroyed?.(x, y);
+  }
+
   // Damageable interface implementation
   takeDamage(damage: number): boolean {
     this.currentHealth = Math.max(0, this.currentHealth - damage);
     const wasDestroyed = this.currentHealth <= 0;
-    if (wasDestroyed) {
-      this.sprite.destroy();
-      this.healthBar.destroy();
-    } else {
+    if (!wasDestroyed) {
       this.updateHealthBarPosition();
     }
     return wasDestroyed;
@@ -140,7 +177,7 @@ export abstract class Enemy implements Damageable {
   }
 
   isAlive(): boolean {
-    return this.currentHealth > 0;
+    return this.activeInWorld && this.currentHealth > 0;
   }
 
   /**

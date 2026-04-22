@@ -1,6 +1,8 @@
 import * as Phaser from 'phaser';
 import type { TrainController } from './TrainController';
 
+export type WeaponType = 'cannon' | 'sniper' | 'scatter';
+
 type EnemyTargetingSystem = {
   findClosestLivingEnemyTo(wx: number, wy: number): { x: number; y: number } | null;
   tryHitEnemyWithBullet(
@@ -16,6 +18,12 @@ type Bullet = {
   vx: number;
   vy: number;
   lifeMs: number;
+  damage: number;
+};
+
+type WeaponSlot = {
+  type: WeaponType;
+  level: number;
 };
 
 /**
@@ -35,6 +43,7 @@ export class TrainTurretSystem {
   private readonly gunThickness: number;
   private readonly depth: number;
   private readonly firingRange: number;
+  private readonly slotWeapons: Array<WeaponSlot | null> = [];
 
   constructor(
     scene: Phaser.Scene,
@@ -63,6 +72,7 @@ export class TrainTurretSystem {
   }
 
   rebuildFromTrain(train: TrainController): void {
+    const previous = [...this.slotWeapons];
     for (const g of this.guns) {
       g.destroy();
     }
@@ -74,8 +84,11 @@ export class TrainTurretSystem {
     this.bullets.length = 0;
 
     const mounts = train.getTurretWorldPositions();
+    this.slotWeapons.length = mounts.length;
     for (let i = 0; i < mounts.length; i++) {
       const m = mounts[i]!;
+      this.slotWeapons[i] =
+        previous[i] ?? (i < 2 ? { type: 'cannon', level: 1 } : null);
       const gun = this.scene.add.rectangle(
         m.x,
         m.y,
@@ -87,9 +100,110 @@ export class TrainTurretSystem {
       gun.setStrokeStyle(2, 0xc9d1d9);
       gun.setOrigin(0.2, 0.5);
       gun.setDepth(this.depth);
+      this.applyGunStyle(gun, this.slotWeapons[i] ?? null);
       this.guns.push(gun);
       this.fireAcc.push(0);
     }
+  }
+
+  private getWeaponStats(slot: WeaponSlot) {
+    const levelScale = 1 + (slot.level - 1) * 0.14;
+    switch (slot.type) {
+      case 'cannon':
+        return {
+          color: 0xc9d1d9,
+          interval: this.fireIntervalMs / levelScale,
+          bulletSpeed: this.bulletSpeed,
+          bulletLifeMs: this.bulletLifeMs,
+          range: this.firingRange,
+          damage: 30 * levelScale,
+          pellets: 1,
+          spreadRad: 0,
+        };
+      case 'sniper':
+        return {
+          color: 0x8bd5ff,
+          interval: (this.fireIntervalMs * 1.45) / levelScale,
+          bulletSpeed: this.bulletSpeed * 1.55,
+          bulletLifeMs: this.bulletLifeMs * 1.5,
+          range: this.firingRange * 1.55,
+          damage: 55 * levelScale,
+          pellets: 1,
+          spreadRad: 0,
+        };
+      case 'scatter':
+        return {
+          color: 0xffc266,
+          interval: (this.fireIntervalMs * 0.92) / levelScale,
+          bulletSpeed: this.bulletSpeed * 0.9,
+          bulletLifeMs: this.bulletLifeMs * 0.72,
+          range: this.firingRange * 0.8,
+          damage: 14 * levelScale,
+          pellets: 3,
+          spreadRad: Phaser.Math.DegToRad(10),
+        };
+    }
+  }
+
+  private applyGunStyle(
+    gun: Phaser.GameObjects.Rectangle,
+    slot: WeaponSlot | null,
+  ): void {
+    if (!slot) {
+      gun.setFillStyle(0x4a4f57, 0.65);
+      gun.setStrokeStyle(1, 0x707680, 0.7);
+      return;
+    }
+    const stats = this.getWeaponStats(slot);
+    gun.setFillStyle(0x6e7681, 1);
+    gun.setStrokeStyle(2, stats.color, 1);
+    gun.setScale(1 + (slot.level - 1) * 0.04, 1 + (slot.level - 1) * 0.04);
+  }
+
+  hasFreeSlot(): boolean {
+    return this.slotWeapons.some((s) => s === null);
+  }
+
+  hasWeaponType(type: WeaponType): boolean {
+    return this.slotWeapons.some((s) => s?.type === type);
+  }
+
+  getClosestEmptySlotIndex(wx: number, wy: number, train: TrainController): number | null {
+    const mounts = train.getTurretWorldPositions();
+    let best: { idx: number; d: number } | null = null;
+    for (let i = 0; i < mounts.length; i++) {
+      if (this.slotWeapons[i] !== null) continue;
+      const m = mounts[i];
+      if (!m) continue;
+      const dx = m.x - wx;
+      const dy = m.y - wy;
+      const d = dx * dx + dy * dy;
+      if (!best || d < best.d) {
+        best = { idx: i, d };
+      }
+    }
+    return best ? best.idx : null;
+  }
+
+  placeWeaponAtSlot(index: number, type: WeaponType): boolean {
+    if (!this.guns[index] || this.slotWeapons[index] !== null) return false;
+    this.slotWeapons[index] = { type, level: 1 };
+    this.applyGunStyle(this.guns[index]!, this.slotWeapons[index]);
+    return true;
+  }
+
+  upgradeMatchingWeapon(type: WeaponType): boolean {
+    for (let i = 0; i < this.slotWeapons.length; i++) {
+      const slot = this.slotWeapons[i];
+      if (slot?.type !== type) continue;
+      slot.level += 1;
+      const gun = this.guns[i];
+      if (gun) {
+        this.applyGunStyle(gun, slot);
+      }
+      return true;
+    }
+    return false;
   }
 
   update(
@@ -113,7 +227,8 @@ export class TrainTurretSystem {
     for (let i = 0; i < this.guns.length; i++) {
       const gun = this.guns[i];
       const m = mounts[i];
-      if (!gun || !m) continue;
+      const slot = this.slotWeapons[i];
+      if (!gun || !m || !slot) continue;
       gun.setPosition(m.x, m.y);
 
       const target = enemies.findClosestLivingEnemyTo(m.x, m.y);
@@ -132,8 +247,10 @@ export class TrainTurretSystem {
         continue;
       }
 
+      const stats = this.getWeaponStats(slot);
+
       // Only fire if target is within range AND on screen
-      if (distance > this.firingRange) {
+      if (distance > stats.range) {
         continue;
       }
 
@@ -143,24 +260,35 @@ export class TrainTurretSystem {
       }
 
       this.fireAcc[i] = (this.fireAcc[i] ?? 0) + deltaMs;
-      if ((this.fireAcc[i] ?? 0) < this.fireIntervalMs) continue;
+      if ((this.fireAcc[i] ?? 0) < stats.interval) continue;
       this.fireAcc[i] = 0;
 
       const tipDist = this.gunLength * 0.85;
       const tipX = m.x + Math.cos(ang) * tipDist;
       const tipY = m.y + Math.sin(ang) * tipDist;
-      const vx = Math.cos(ang) * this.bulletSpeed;
-      const vy = Math.sin(ang) * this.bulletSpeed;
-
-      const g = this.scene.add.circle(
-        tipX,
-        tipY,
-        this.bulletRadius,
-        this.bulletColor,
-        1,
-      );
-      g.setDepth(this.depth + 1);
-      this.bullets.push({ graphic: g, vx, vy, lifeMs: this.bulletLifeMs });
+      const pellets = Math.max(1, stats.pellets);
+      for (let p = 0; p < pellets; p++) {
+        const t = pellets <= 1 ? 0 : p / (pellets - 1);
+        const spread = (t - 0.5) * 2 * stats.spreadRad;
+        const shotAng = ang + spread;
+        const vx = Math.cos(shotAng) * stats.bulletSpeed;
+        const vy = Math.sin(shotAng) * stats.bulletSpeed;
+        const g = this.scene.add.circle(
+          tipX,
+          tipY,
+          this.bulletRadius,
+          stats.color ?? this.bulletColor,
+          1,
+        );
+        g.setDepth(this.depth + 1);
+        this.bullets.push({
+          graphic: g,
+          vx,
+          vy,
+          lifeMs: stats.bulletLifeMs,
+          damage: stats.damage,
+        });
+      }
     }
 
     this.updateBullets(deltaMs, enemies);
@@ -190,7 +318,7 @@ export class TrainTurretSystem {
       // Only hit enemies if bullet is within camera bounds
       const isOnScreen = nx >= camX && nx <= camX + camW && ny >= camY && ny <= camY + camH;
       if (isOnScreen) {
-        const hit = enemies.tryHitEnemyWithBullet(nx, ny, this.bulletRadius, 30);
+        const hit = enemies.tryHitEnemyWithBullet(nx, ny, this.bulletRadius, b.damage);
         if (hit) {
           b.graphic.destroy();
           this.bullets.splice(i, 1);

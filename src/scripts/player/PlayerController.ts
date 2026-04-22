@@ -20,6 +20,7 @@ export type PlayerControllerOptions = {
 export class PlayerController {
   readonly sprite: Phaser.GameObjects.Arc;
   private readonly walkSpeed: number;
+  private walkSpeedMultiplier = 1;
   private readonly radius: number;
   private readonly keyW: Phaser.Input.Keyboard.Key;
   private readonly keyA: Phaser.Input.Keyboard.Key;
@@ -58,6 +59,10 @@ export class PlayerController {
     return this.radius;
   }
 
+  addWalkSpeedMultiplier(amount: number): void {
+    this.walkSpeedMultiplier = Math.max(0.1, this.walkSpeedMultiplier + amount);
+  }
+
   private readWalkAxes(): { ax: number; ay: number } {
     let vx = 0;
     let vy = 0;
@@ -85,8 +90,9 @@ export class PlayerController {
   ): void {
     const { ax, ay } = this.readWalkAxes();
     const dt = deltaMs / 1000;
-    let ox = offset.x + ax * this.walkSpeed * dt;
-    let oy = offset.y + ay * this.walkSpeed * dt;
+    const speed = this.walkSpeed * this.walkSpeedMultiplier;
+    let ox = offset.x + ax * speed * dt;
+    let oy = offset.y + ay * speed * dt;
     const minOx = trainBody.width * 0.5 + outsideTrainGap + this.radius;
     ox = Math.max(minOx, ox);
 
@@ -128,9 +134,10 @@ export class PlayerController {
     const dt = deltaMs / 1000;
     const { ax, ay } = this.readWalkAxes();
 
+    const speed = this.walkSpeed * this.walkSpeedMultiplier;
     let { x, y } = this.sprite;
-    x += ax * this.walkSpeed * dt;
-    y += ay * this.walkSpeed * dt;
+    x += ax * speed * dt;
+    y += ay * speed * dt;
 
     let pushed = { x, y };
     for (const h of hulls) {

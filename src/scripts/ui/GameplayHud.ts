@@ -19,6 +19,7 @@ export class GameplayHud {
   private betweenWaveText?: Phaser.GameObjects.Text;
   private waveStartAlpha: number = 1;
   private betweenWaveTimer: number = 0;
+  private visible = true;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -91,6 +92,8 @@ export class GameplayHud {
   }
 
   update(train: TrainController, ridingTrain: boolean): void {
+    if (!this.visible) return;
+
     const c = this.cfg;
     const hpFrac = train.maxHealth > 0 ? train.health / train.maxHealth : 0;
     const coalFrac = train.coalMax > 0 ? train.coal / train.coalMax : 0;
@@ -118,6 +121,16 @@ export class GameplayHud {
     this.text.setText(
       `WASD · E board / leave (engine only)\nTrain HP ${Math.ceil(train.health)}/${train.maxHealth} · Coal ${Math.ceil(train.coal)}/${train.coalMax}\n${motion}`,
     );
+  }
+
+  setVisible(on: boolean): void {
+    this.visible = on;
+    this.gfx.setVisible(on);
+    this.text.setVisible(on);
+    this.waveStartText?.setVisible(on);
+    this.waveCompletedText?.setVisible(on);
+    this.waveInfoText?.setVisible(on);
+    this.betweenWaveText?.setVisible(on);
   }
 
   /**

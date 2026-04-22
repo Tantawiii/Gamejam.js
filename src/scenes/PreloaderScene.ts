@@ -40,6 +40,10 @@ export class PreloaderScene extends Phaser.Scene {
     });
 
     this.load.image('NORMAL_ENEMY', 'assets/NORMAL_ENEMY.png');
+    this.load.script(
+      'webfont',
+      'https://ajax.googleapis.com/ajax/libs/webfont/1.6.26/webfont.js',
+    );
     registerAssets(this);
   }
 }

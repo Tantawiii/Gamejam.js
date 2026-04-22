@@ -34,6 +34,7 @@ export class TrainController {
   private cruiseSpeed: number;
   private movementEnabled = true;
   private cruising = false;
+  private coalConsumptionEnabled = true;
   private readonly fleetCfg: MainTrainFleetConfig;
   private readonly coalCfg: MainTrainCoalConfig;
 
@@ -41,7 +42,7 @@ export class TrainController {
   readonly body: Phaser.GameObjects.Rectangle;
 
   health: number;
-  readonly maxHealth: number;
+  maxHealth: number;
   readonly boardingRadius: number;
 
   coal: number;
@@ -120,6 +121,12 @@ export class TrainController {
     this.coal = Math.min(this.coalMax, this.coal + amount);
   }
 
+  addMaxHealth(amount: number): void {
+    if (amount <= 0) return;
+    this.maxHealth += amount;
+    this.health = Math.min(this.maxHealth, this.health + amount);
+  }
+
   private computeCoalDrainPerSec(): number {
     const w = this.getActiveWeaponCount();
     const carts = this.getCarriageCount();
@@ -184,6 +191,10 @@ export class TrainController {
     return this.cruising;
   }
 
+  setCoalConsumptionEnabled(on: boolean): void {
+    this.coalConsumptionEnabled = on;
+  }
+
   takeDamage(amount: number): void {
     if (amount <= 0 || this.health <= 0) return;
     this.health = Math.max(0, this.health - amount);
@@ -211,8 +222,10 @@ export class TrainController {
     if (this.coal <= 0) return;
 
     const dt = deltaMs / 1000;
-    const drain = this.computeCoalDrainPerSec() * dt;
-    this.coal = Math.max(0, this.coal - drain);
+    if (this.coalConsumptionEnabled) {
+      const drain = this.computeCoalDrainPerSec() * dt;
+      this.coal = Math.max(0, this.coal - drain);
+    }
 
     const dy = -this.cruiseSpeed * dt;
     for (const p of this.parts) {

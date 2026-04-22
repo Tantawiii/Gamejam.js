@@ -133,6 +133,11 @@ export class ChunkyEnemy extends Enemy {
     }
   }
 
+  override resetForSpawn(x: number, y: number, health: number): void {
+    super.resetForSpawn(x, y, health);
+    this.attackCooldownMs = 0;
+  }
+
   getRadius(): number {
     return this.radius;
   }

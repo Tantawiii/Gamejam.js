@@ -24,6 +24,13 @@ export class TrainRidingController {
     return this.riding;
   }
 
+  setRiding(on: boolean): void {
+    this.riding = on;
+    if (on) {
+      this.resetRideOffsetToStarboard();
+    }
+  }
+
   private resetRideOffsetToStarboard(): void {
     const t = this.train.body;
     const r = this.player.getRadius();
