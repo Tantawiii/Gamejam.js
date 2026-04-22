@@ -17,9 +17,7 @@ export class GameplayHud {
   private waveCompletedText?: Phaser.GameObjects.Text;
   private waveInfoText?: Phaser.GameObjects.Text;
   private betweenWaveText?: Phaser.GameObjects.Text;
-  private currentWave: number = 1;
   private waveStartAlpha: number = 1;
-  private waveCompletedAlpha: number = 0;
   private betweenWaveTimer: number = 0;
 
   constructor(scene: Phaser.Scene) {
@@ -125,8 +123,7 @@ export class GameplayHud {
   /**
    * Called when a wave starts
    */
-  onWaveStarted(waveNumber: number, totalEnemies: number): void {
-    this.currentWave = waveNumber;
+  onWaveStarted(waveNumber: number, _totalEnemies: number): void {
     this.waveStartAlpha = 1;
     if (this.waveStartText) {
       this.waveStartText.setText(`Wave ${waveNumber}`);
@@ -137,8 +134,7 @@ export class GameplayHud {
   /**
    * Called when a wave completes
    */
-  onWaveCompleted(waveNumber: number): void {
-    this.waveCompletedAlpha = 1;
+  onWaveCompleted(_waveNumber: number): void {
     this.betweenWaveTimer = 3; // 3 seconds
     if (this.waveCompletedText) {
       this.waveCompletedText.setAlpha(1);
@@ -163,7 +159,6 @@ export class GameplayHud {
     // Update wave info (alive and remaining)
     const aliveCount = waves.getTotalAliveEnemies();
     const remainingCount = waves.getTotalRemainingToSpawn();
-    const totalAlive = aliveCount + remainingCount;
 
     if (this.waveInfoText) {
       this.waveInfoText.setText(`Wave ${waves.getCurrentWave()}\nEnemies: ${aliveCount} alive\nRemaining: ${remainingCount}`);

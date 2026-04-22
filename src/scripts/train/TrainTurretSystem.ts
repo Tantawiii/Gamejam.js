@@ -1,6 +1,15 @@
 import * as Phaser from 'phaser';
-import type { EnemySwarm } from '../enemy/EnemySwarm';
 import type { TrainController } from './TrainController';
+
+type EnemyTargetingSystem = {
+  findClosestLivingEnemyTo(wx: number, wy: number): { x: number; y: number } | null;
+  tryHitEnemyWithBullet(
+    bx: number,
+    by: number,
+    bulletRadius: number,
+    bulletDamage?: number,
+  ): boolean;
+};
 
 type Bullet = {
   graphic: Phaser.GameObjects.Arc;
@@ -86,7 +95,7 @@ export class TrainTurretSystem {
   update(
     deltaMs: number,
     train: TrainController,
-    enemies: EnemySwarm,
+    enemies: EnemyTargetingSystem,
     canFire: boolean,
   ): void {
     const mounts = train.getTurretWorldPositions();
@@ -157,7 +166,7 @@ export class TrainTurretSystem {
     this.updateBullets(deltaMs, enemies);
   }
 
-  private updateBullets(deltaMs: number, enemies: EnemySwarm): void {
+  private updateBullets(deltaMs: number, enemies: EnemyTargetingSystem): void {
     const dt = deltaMs / 1000;
     const cam = this.scene.cameras.main;
     const camX = cam.worldView.x;

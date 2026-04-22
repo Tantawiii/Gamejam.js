@@ -4,7 +4,7 @@ import { BasicEnemy } from '../enemy/BasicEnemy';
 import { BombEnemy } from '../enemy/BombEnemy';
 import { ChunkyEnemy } from '../enemy/ChunkyEnemy';
 import type { Enemy } from '../enemy/Enemy';
-import { getWaveConfig, getBetweenWaveConfig, type EnemyType, type EnemySpec } from './WaveConfiguration';
+import { getWaveConfig, getBetweenWaveConfig, type EnemyType } from './WaveConfiguration';
 
 /**
  * WAVESYSTEM.TS - Manages Wave-Based Enemy Spawning and Progression
@@ -61,8 +61,6 @@ export class WaveSystem {
   
   // Config
   private enemySpawnInterval: number = 200; // ms between spawning each enemy
-  private worldWidth: number;
-  private worldHeight: number;
   private spawnRadiusMin: number;
   private spawnRadiusMax: number;
 
@@ -70,8 +68,8 @@ export class WaveSystem {
     scene: Phaser.Scene,
     train: TrainController,
     getPlayerWorld: () => { x: number; y: number },
-    worldWidth: number,
-    worldHeight: number,
+    _worldWidth: number,
+    _worldHeight: number,
     callbacks: WaveSystemCallback = {},
     difficultyMultiplier: number = 1.2,
     spawnRadiusMin: number = 320,
@@ -82,8 +80,6 @@ export class WaveSystem {
     this.getPlayerWorld = getPlayerWorld;
     this.callbacks = callbacks;
     this.difficultyMultiplier = difficultyMultiplier;
-    this.worldWidth = worldWidth;
-    this.worldHeight = worldHeight;
     this.spawnRadiusMin = spawnRadiusMin;
     this.spawnRadiusMax = spawnRadiusMax;
 
@@ -317,7 +313,7 @@ export class WaveSystem {
     const aliveCount = this.getTotalAliveEnemies();
     const pendingCount = this.getTotalRemainingToSpawn();
 
-    if (aliveCount === 0 && pendingCount === 0 && this.currentState !== 'between_waves') {
+    if (aliveCount === 0 && pendingCount === 0) {
       this.currentState = 'between_waves';
       this.callbacks.onWaveCompleted?.(this.currentWave);
       this.betweenWaveAcc = 0;
@@ -349,7 +345,6 @@ export class WaveSystem {
       if (e && e.isAlive() && e.canBeHitByBullet(bx, by, bulletRadius)) {
         const wasDestroyed = e.takeDamage(bulletDamage);
         if (wasDestroyed) {
-          const pos = e.getPosition();
           e.destroy(this.callbacks.onEnemyDestroyed);
           this.waveEnemies.splice(i, 1);
         }
