@@ -787,24 +787,29 @@ export class MainScene extends Phaser.Scene {
 
     const ridingNow = this.riding?.isRiding() ?? false;
     const train = this.train;
-    const coalOkBeforeStep = train?.hasCoal() ?? false;
-
+    const accelerateDown = this.keyAccelerate?.isDown ?? false;
+    const brakeDown = this.keyBrake?.isDown ?? false;
     const shouldCruise = this.introCutsceneActive
       ? true
       : !gameplayLocked && ridingNow;
+
     this.train?.setCruising(shouldCruise);
     if (train) {
-      const accelerating = shouldCruise && (this.keyAccelerate?.isDown ?? false);
-      const braking = shouldCruise && (this.keyBrake?.isDown ?? false);
+      const accelerating = shouldCruise && accelerateDown;
+      const braking = shouldCruise && brakeDown;
       const throttle = accelerating ? 1 : braking ? -1 : 0;
       train.setThrottle(throttle);
     }
-    if (shouldCruise && (coalOkBeforeStep || this.introCutsceneActive)) {
-      const speedRatio = train ? train.getSpeed() / Math.max(1, train.getMaxSpeed()) : 0;
-      const parallaxScale = this.introCutsceneActive ? 1 : 0.7 + speedRatio * 1.9;
-      this.parallax?.update(delta, parallaxScale);
-    }
     this.train?.update(delta);
+    const trainScrollSpeed = train?.getSpeed() ?? 0;
+    const trainScrollDy = (trainScrollSpeed * delta) / 1000;
+    if (train && trainScrollSpeed > 0) {
+      const speedRatio = trainScrollSpeed / Math.max(1, train.getMaxSpeed());
+      const parallaxScale = 0.7 + speedRatio * 1.9;
+      this.parallax?.update(delta, parallaxScale);
+      this.coalPickups?.addWorldOffset(0, trainScrollDy);
+      this.expPickups?.addWorldOffset(0, trainScrollDy);
+    }
     const coalOk = train?.hasCoal() ?? false;
 
     if (!cardsActive) {
@@ -824,12 +829,8 @@ export class MainScene extends Phaser.Scene {
     } else if (!cardsActive && train && waves) {
       waves.update(delta);
       waves.updateEnemies(delta);
-      const acceleratingFactor = Math.max(0, train.getThrottle());
-      if (acceleratingFactor > 0.01 && ridingNow) {
-        const dt = delta / 1000;
-        const speedRatio = train.getSpeed() / Math.max(1, train.getMaxSpeed());
-        const passBySpeed = (80 + 240 * speedRatio) * acceleratingFactor;
-        waves.addEnemyWorldOffset(0, passBySpeed * dt);
+      if (trainScrollDy > 0) {
+        waves.addEnemyWorldOffset(0, trainScrollDy);
       }
       const hulls = train.getHullRects();
       waves.updateCollisions(hulls, () => {
@@ -848,20 +849,25 @@ export class MainScene extends Phaser.Scene {
 
     const player = this.player;
     if (!this.introCutsceneActive && train && this.coalPickups && player) {
+      // If riding, coal/exp is collected by train; player sprite is invisible and should not collect.
+      const playerX = ridingNow ? -999999 : player.sprite.x;
+      const playerY = ridingNow ? -999999 : player.sprite.y;
+
       const fuelGained = this.coalPickups.update(
         delta,
-        player.sprite.x,
-        player.sprite.y,
+        playerX,
+        playerY,
         MAIN_PLAYER_VISUAL.radius,
         train,
+        1.0,
       );
       if (fuelGained > 0) {
         this.showFuelGainText(player.sprite.x, player.sprite.y, fuelGained);
       }
       const gained = this.expPickups?.update(
         delta,
-        player.sprite.x,
-        player.sprite.y,
+        playerX,
+        playerY,
         MAIN_PLAYER_VISUAL.radius,
         this.coalPickups.getMagnetRange(),
         train,

@@ -40,6 +40,12 @@ export class ExperiencePickupManager {
     this.pickups.push({ sprite: s, value });
   }
 
+  addWorldOffset(dx: number, dy: number): void {
+    for (const pickup of this.pickups) {
+      pickup.sprite.setPosition(pickup.sprite.x + dx, pickup.sprite.y + dy);
+    }
+  }
+
   update(
     deltaMs: number,
     playerX: number,
@@ -53,9 +59,6 @@ export class ExperiencePickupManager {
     let gained = 0;
 
     const trainRects = train.getHullRects();
-    // Use a smaller magnet range for the train as requested.
-    // Coal pickup uses magnetRange (78). Let's use 60% of that or a fixed smaller value.
-    // The user said "make the pickup range fore the train samller".
     const trainMagnetRange = this.magnetRange * 0.6;
 
     for (let i = this.pickups.length - 1; i >= 0; i--) {

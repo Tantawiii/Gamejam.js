@@ -88,38 +88,17 @@ export class PlayerController {
     outsideTrainGap: number,
     viewPad: number,
   ): void {
-    const { ax, ay } = this.readWalkAxes();
-    const dt = deltaMs / 1000;
-    const speed = this.walkSpeed * this.walkSpeedMultiplier;
-    let ox = offset.x + ax * speed * dt;
-    let oy = offset.y + ay * speed * dt;
-    const minOx = trainBody.width * 0.5 + outsideTrainGap + this.radius;
-    ox = Math.max(minOx, ox);
-
-    let wx = trainBody.x + ox;
-    let wy = trainBody.y + oy;
-    let c = clampCircleToWorldView(
+    const wx = trainBody.x + offset.x;
+    const wy = trainBody.y + offset.y;
+    const clamped = clampCircleToWorldView(
       wx,
       wy,
       this.radius,
       camera.worldView,
       viewPad,
     );
-    wx = c.x;
-    wy = c.y;
-    const minWx = trainBody.x + minOx;
-    if (wx < minWx) {
-      wx = minWx;
-    }
-    c = clampCircleToWorldView(wx, wy, this.radius, camera.worldView, viewPad);
-    wx = c.x;
-    wy = c.y;
-    if (wx < minWx) {
-      wx = minWx;
-    }
-
-    offset.set(wx - trainBody.x, wy - trainBody.y);
-    this.sprite.setPosition(wx, wy);
+    this.sprite.setPosition(clamped.x, clamped.y);
+    offset.set(clamped.x - trainBody.x, clamped.y - trainBody.y);
   }
 
   /**

@@ -41,6 +41,9 @@ export interface WaveSystemCallback {
 }
 
 export class WaveSystem {
+  private static readonly BASIC_ENEMY_SPEED = 62;
+  private static readonly BOMB_ENEMY_SPEED = 62;
+  private static readonly CHUNKY_ENEMY_SPEED = 62 * 0.5;
   private readonly scene: Phaser.Scene;
   private readonly train: TrainController;
   private readonly getPlayerWorld: () => { x: number; y: number };
@@ -187,7 +190,7 @@ export class WaveSystem {
           x,
           y,
           commonRadius,
-          62, // speed
+          WaveSystem.BASIC_ENEMY_SPEED,
           0xd73a49, // fillColor
           0xffb1ba, // strokeColor
           8, // depth
@@ -205,7 +208,7 @@ export class WaveSystem {
           x,
           y,
           commonRadius * 0.8,
-          62, // speed
+          WaveSystem.BOMB_ENEMY_SPEED,
           0x800080, // fillColor
           0xff00ff, // strokeColor
           8, // depth
@@ -225,7 +228,7 @@ export class WaveSystem {
           x,
           y,
           commonRadius * 1.5,
-          62 * 0.5, // 50% slower
+          WaveSystem.CHUNKY_ENEMY_SPEED,
           0x8b4513, // fillColor
           0xd2691e, // strokeColor
           8, // depth

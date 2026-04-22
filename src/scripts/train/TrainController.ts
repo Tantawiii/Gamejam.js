@@ -281,11 +281,7 @@ export class TrainController {
   }
 
   update(deltaMs: number): void {
-    if (!this.movementEnabled || this.isDestroyed || !this.cruising) {
-      this.speed = 0;
-      return;
-    }
-    if (this.coal <= 0) {
+    if (!this.movementEnabled || this.isDestroyed) {
       this.speed = 0;
       return;
     }
@@ -294,21 +290,28 @@ export class TrainController {
     const accel = this.baseAcceleration * this.accelerationMultiplier;
     const brake = this.baseBrakeDeceleration;
     const drag = this.baseDragDeceleration;
-    if (this.throttle > 0.05) {
-      this.speed = Math.min(this.maxSpeed, this.speed + accel * this.throttle * dt);
-    } else if (this.throttle < -0.05) {
-      this.speed = Math.max(0, this.speed - brake * (-this.throttle) * dt);
+
+    // Only allow acceleration if we have coal
+    const effectiveThrottle = this.coal > 0 ? this.throttle : Math.min(0, this.throttle);
+
+    const oldSpeed = this.speed;
+    // We update speed if cruising OR if we already have some speed (to allow coasting/decelerating)
+    if (this.cruising || this.speed > 0) {
+      if (effectiveThrottle > 0.05) {
+        this.speed = Math.min(this.maxSpeed, this.speed + accel * effectiveThrottle * dt);
+      } else if (effectiveThrottle < -0.05) {
+        this.speed = Math.max(0, this.speed - brake * (-effectiveThrottle) * dt);
+      } else {
+        this.speed = Math.max(0, this.speed - drag * dt);
+      }
     } else {
-      this.speed = Math.max(0, this.speed - drag * dt);
+      // If we are NOT cruising and NOT already moving, speed stays 0.
+      this.speed = 0;
     }
 
     if (this.coalConsumptionEnabled) {
       const drain = this.computeCoalDrainPerSec() * dt;
       this.coal = Math.max(0, this.coal - drain);
-      if (this.coal <= 0) {
-        this.speed = 0;
-        return;
-      }
     }
 
     // Keep train fixed in world space so it remains screen-centered; movement feel

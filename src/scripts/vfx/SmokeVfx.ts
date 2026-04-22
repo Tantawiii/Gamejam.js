@@ -12,14 +12,20 @@ export interface GreySmokeVfxConfig {
 
 /**
  * Creates a reusable grey smoke particle effect.
- * Requires the `flares` atlas with frame `white` to be loaded.
+ * Uses a generated circle texture named 'smoke_particle'.
  */
 export function createGreySmokeVfx(
   scene: Phaser.Scene,
   config: GreySmokeVfxConfig,
 ): Phaser.GameObjects.Particles.ParticleEmitter {
-  const emitter = scene.add.particles(config.x, config.y, 'flares', {
-    frame: 'white',
+  if (!scene.textures.exists('smoke_particle')) {
+    const graphics = scene.make.graphics({ x: 0, y: 0, add: false });
+    graphics.fillStyle(0xffffff, 1);
+    graphics.fillCircle(8, 8, 8);
+    graphics.generateTexture('smoke_particle', 16, 16);
+  }
+
+  const emitter = scene.add.particles(config.x, config.y, 'smoke_particle', {
     color: [0xf1f1f1, 0xd7d7d7, 0xb8b8b8, 0x8f8f8f, 0x666666, 0x3f3f3f],
     colorEase: 'quad.out',
     lifespan: { min: 1800, max: 2500 },

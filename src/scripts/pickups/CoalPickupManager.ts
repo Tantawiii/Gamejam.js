@@ -55,14 +55,20 @@ export class CoalPickupManager {
     this.pickups.push({ sprite: s, value });
   }
 
+  addWorldOffset(dx: number, dy: number): void {
+    for (const pickup of this.pickups) {
+      pickup.sprite.setPosition(pickup.sprite.x + dx, pickup.sprite.y + dy);
+    }
+  }
+
   update(
     deltaMs: number,
     playerX: number,
     playerY: number,
     playerRadius: number,
     train: TrainController,
+    magnetRangeMultiplier: number = 1.0,
   ): number {
-    const magnetRangeSq = this.magnetRange * this.magnetRange;
     const dt = deltaMs / 1000;
     let gained = 0;
 
@@ -72,10 +78,6 @@ export class CoalPickupManager {
       const p = this.pickups[i];
       if (!p) continue;
 
-      let targetX = playerX;
-      let targetY = playerY;
-      let targetRadius = playerRadius;
-      
       // We will track the minimum squared distance TO THE EDGE of the target.
       // For a circle (player), this is (distance to center - playerRadius).
       // For a rectangle (train part), this is the distance to the nearest point on the rectangle.
@@ -124,7 +126,11 @@ export class CoalPickupManager {
       }
 
       // Attraction check: if edge distance <= magnet range.
-      if (minEdgeDist <= this.magnetRange) {
+      const baseMagnetRange = this.magnetRange * magnetRangeMultiplier;
+      const trainMagnetRange = baseMagnetRange * 0.6;
+      const currentTargetMagnetRange = bestTargetIsPlayer ? baseMagnetRange : trainMagnetRange;
+
+      if (minEdgeDist <= currentTargetMagnetRange) {
         // Move towards the target center (or could move towards closest point)
         // Moving towards center feels more like a strong magnet.
         const dx = p.sprite.x - bestTargetX;
