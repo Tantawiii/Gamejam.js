@@ -1,4 +1,5 @@
 import * as Phaser from 'phaser';
+import type { TrainController } from '../train/TrainController';
 
 type Pickup = {
   sprite: Phaser.GameObjects.Arc;
@@ -45,32 +46,74 @@ export class ExperiencePickupManager {
     playerY: number,
     playerRadius: number,
     magnetRange: number,
+    train: TrainController,
   ): number {
     this.magnetRange = Math.max(0, magnetRange);
-    const collectR = playerRadius + this.radius;
-    const rSq = collectR * collectR;
-    const magnetRSq = this.magnetRange * this.magnetRange;
     const dt = deltaMs / 1000;
     let gained = 0;
+
+    const trainRects = train.getHullRects();
+    // Use a smaller magnet range for the train as requested.
+    // Coal pickup uses magnetRange (78). Let's use 60% of that or a fixed smaller value.
+    // The user said "make the pickup range fore the train samller".
+    const trainMagnetRange = this.magnetRange * 0.6;
+
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const p = this.pickups[i];
       if (!p) continue;
-      const dx = p.sprite.x - playerX;
-      const dy = p.sprite.y - playerY;
-      const dSq = dx * dx + dy * dy;
-      if (dSq <= rSq) {
+
+      // Player check
+      const pdx = p.sprite.x - playerX;
+      const pdy = p.sprite.y - playerY;
+      const pDistCenter = Math.sqrt(pdx * pdx + pdy * pdy);
+      let minEdgeDist = pDistCenter - playerRadius;
+
+      let bestTargetX = playerX;
+      let bestTargetY = playerY;
+      let currentMagnetRange = this.magnetRange;
+
+      // Check train parts
+      for (const rect of trainRects) {
+        const left = rect.x - rect.width * 0.5;
+        const right = rect.x + rect.width * 0.5;
+        const top = rect.y - rect.height * 0.5;
+        const bottom = rect.y + rect.height * 0.5;
+
+        const closestX = Math.max(left, Math.min(p.sprite.x, right));
+        const closestY = Math.max(top, Math.min(p.sprite.y, bottom));
+
+        const rdx = p.sprite.x - closestX;
+        const rdy = p.sprite.y - closestY;
+        const rEdgeDist = Math.sqrt(rdx * rdx + rdy * rdy);
+
+        if (rEdgeDist < minEdgeDist) {
+          minEdgeDist = rEdgeDist;
+          bestTargetX = rect.x;
+          bestTargetY = rect.y;
+          currentMagnetRange = trainMagnetRange;
+        }
+      }
+
+      // Collection check
+      if (minEdgeDist <= this.radius) {
         gained += p.value;
         p.sprite.destroy();
         this.pickups.splice(i, 1);
         continue;
       }
-      if (dSq <= magnetRSq && dSq > 1e-6) {
-        const dist = Math.sqrt(dSq);
-        const step = Math.min(dist, this.magnetSpeed * dt);
-        p.sprite.setPosition(
-          p.sprite.x - (dx / dist) * step,
-          p.sprite.y - (dy / dist) * step,
-        );
+
+      // Attraction check
+      if (minEdgeDist <= currentMagnetRange) {
+        const dx = p.sprite.x - bestTargetX;
+        const dy = p.sprite.y - bestTargetY;
+        const distToCenter = Math.sqrt(dx * dx + dy * dy);
+
+        if (distToCenter > 1e-6) {
+          const step = Math.min(distToCenter, this.magnetSpeed * dt);
+          const nx = p.sprite.x - (dx / distToCenter) * step;
+          const ny = p.sprite.y - (dy / distToCenter) * step;
+          p.sprite.setPosition(nx, ny);
+        }
       }
     }
     return gained;

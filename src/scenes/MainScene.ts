@@ -864,6 +864,7 @@ export class MainScene extends Phaser.Scene {
         player.sprite.y,
         MAIN_PLAYER_VISUAL.radius,
         this.coalPickups.getMagnetRange(),
+        train,
       ) ?? 0;
       if (gained > 0) {
         this.gainExperience(gained);

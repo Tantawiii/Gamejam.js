@@ -62,19 +62,60 @@ export class CoalPickupManager {
     playerRadius: number,
     train: TrainController,
   ): number {
-    const collectR = playerRadius + this.radius;
-    const rSq = collectR * collectR;
-    const magnetRSq = this.magnetRange * this.magnetRange;
+    const magnetRangeSq = this.magnetRange * this.magnetRange;
     const dt = deltaMs / 1000;
     let gained = 0;
+
+    const trainRects = train.getHullRects();
 
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const p = this.pickups[i];
       if (!p) continue;
-      const dx = p.sprite.x - playerX;
-      const dy = p.sprite.y - playerY;
-      const dSq = dx * dx + dy * dy;
-      if (dSq <= rSq) {
+
+      let targetX = playerX;
+      let targetY = playerY;
+      let targetRadius = playerRadius;
+      
+      // We will track the minimum squared distance TO THE EDGE of the target.
+      // For a circle (player), this is (distance to center - playerRadius).
+      // For a rectangle (train part), this is the distance to the nearest point on the rectangle.
+      
+      // Player check
+      const pdx = p.sprite.x - playerX;
+      const pdy = p.sprite.y - playerY;
+      const pDistCenter = Math.sqrt(pdx * pdx + pdy * pdy);
+      // Distance to edge (can be negative if inside)
+      let minEdgeDist = pDistCenter - playerRadius;
+      
+      let bestTargetX = playerX;
+      let bestTargetY = playerY;
+      let bestTargetIsPlayer = true;
+
+      // Check train parts
+      for (const rect of trainRects) {
+        // Distance to the closest point on the rectangle
+        const left = rect.x - rect.width * 0.5;
+        const right = rect.x + rect.width * 0.5;
+        const top = rect.y - rect.height * 0.5;
+        const bottom = rect.y + rect.height * 0.5;
+        
+        const closestX = Math.max(left, Math.min(p.sprite.x, right));
+        const closestY = Math.max(top, Math.min(p.sprite.y, bottom));
+        
+        const rdx = p.sprite.x - closestX;
+        const rdy = p.sprite.y - closestY;
+        const rEdgeDist = Math.sqrt(rdx * rdx + rdy * rdy);
+        
+        if (rEdgeDist < minEdgeDist) {
+          minEdgeDist = rEdgeDist;
+          bestTargetX = rect.x;
+          bestTargetY = rect.y;
+          bestTargetIsPlayer = false;
+        }
+      }
+
+      // Collection check: if edge distance <= our radius, we are touching.
+      if (minEdgeDist <= this.radius) {
         train.addCoal(p.value);
         gained += p.value;
         p.sprite.destroy();
@@ -82,12 +123,20 @@ export class CoalPickupManager {
         continue;
       }
 
-      if (dSq <= magnetRSq && dSq > 1e-6) {
-        const dist = Math.sqrt(dSq);
-        const step = Math.min(dist, this.magnetSpeed * dt);
-        const nx = p.sprite.x - (dx / dist) * step;
-        const ny = p.sprite.y - (dy / dist) * step;
-        p.sprite.setPosition(nx, ny);
+      // Attraction check: if edge distance <= magnet range.
+      if (minEdgeDist <= this.magnetRange) {
+        // Move towards the target center (or could move towards closest point)
+        // Moving towards center feels more like a strong magnet.
+        const dx = p.sprite.x - bestTargetX;
+        const dy = p.sprite.y - bestTargetY;
+        const distToCenter = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distToCenter > 1e-6) {
+          const step = Math.min(distToCenter, this.magnetSpeed * dt);
+          const nx = p.sprite.x - (dx / distToCenter) * step;
+          const ny = p.sprite.y - (dy / distToCenter) * step;
+          p.sprite.setPosition(nx, ny);
+        }
       }
     }
     return gained;
