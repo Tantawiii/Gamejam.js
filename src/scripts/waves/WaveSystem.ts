@@ -4,7 +4,7 @@ import { BasicEnemy } from '../enemy/BasicEnemy';
 import { BombEnemy } from '../enemy/BombEnemy';
 import { ChunkyEnemy } from '../enemy/ChunkyEnemy';
 import type { Enemy } from '../enemy/Enemy';
-import { getWaveConfig, getBetweenWaveConfig, type EnemyType } from './WaveConfiguration';
+import { getWaveConfig, type EnemyType } from './WaveConfiguration';
 
 /**
  * WAVESYSTEM.TS - Manages Wave-Based Enemy Spawning and Progression
@@ -36,7 +36,7 @@ export type WaveSystemState = 'spawning' | 'active' | 'completed' | 'between_wav
 export interface WaveSystemCallback {
   onWaveStarted?: (waveNumber: number, totalEnemies: number) => void;
   onWaveCompleted?: (waveNumber: number) => void;
-  onEnemyDestroyed?: (x: number, y: number) => void;
+  onEnemyDestroyed?: (x: number, y: number, type: EnemyType) => void;
   onEnemyDespawned?: () => void;
 }
 
@@ -48,8 +48,7 @@ export class WaveSystem {
   private readonly difficultyMultiplier: number;
   
   // Wave state
-  private currentWave: number = 1;
-  private currentState: WaveSystemState = 'spawning';
+  private currentState: WaveSystemState = 'active';
   private waveEnemies: Enemy[] = [];
   private pendingEnemies: PendingEnemy[] = [];
   private spawnAcc: number = 0;
@@ -61,12 +60,12 @@ export class WaveSystem {
     chunky: [],
   };
   
-  // Between wave state
-  private betweenWaveAcc: number = 0;
+  private spawnCycle = 0;
   
   // Config
   private enemySpawnInterval: number = 200; // ms between spawning each enemy
   private readonly maxAliveAtOnce = 18;
+  private nightIntensity = 0;
 
   constructor(
     scene: Phaser.Scene,
@@ -92,8 +91,7 @@ export class WaveSystem {
    * Initialize wave with specific number
    */
   private initializeWave(waveNumber: number): void {
-    this.currentWave = waveNumber;
-    this.currentState = 'spawning';
+    this.currentState = 'active';
     for (const e of this.waveEnemies) {
       this.recycleEnemy(e);
     }
@@ -101,9 +99,8 @@ export class WaveSystem {
     this.pendingEnemies = [];
     this.respawnQueue = [];
     this.spawnAcc = 0;
-    this.betweenWaveAcc = 0;
 
-    const waveConfig = getWaveConfig(waveNumber, this.difficultyMultiplier);
+    const waveConfig = getWaveConfig(Math.max(1, waveNumber), this.difficultyMultiplier);
     this.enemySpawnInterval = waveConfig.spawnIntervalMs;
 
     // Create pending enemies to spawn
@@ -118,7 +115,38 @@ export class WaveSystem {
     }
 
     this.totalEnemiesForWave = this.pendingEnemies.length;
-    this.callbacks.onWaveStarted?.(waveNumber, this.totalEnemiesForWave);
+    this.callbacks.onWaveStarted?.(1, this.totalEnemiesForWave);
+  }
+
+  private enqueueNextEndlessBatch(): void {
+    this.spawnCycle += 1;
+    const virtualWave = 1 + Math.floor(this.spawnCycle / 2);
+    const waveConfig = getWaveConfig(virtualWave, this.difficultyMultiplier);
+    this.enemySpawnInterval = waveConfig.spawnIntervalMs;
+    for (const spec of waveConfig.baseEnemies) {
+      for (let i = 0; i < spec.count; i++) {
+        this.pendingEnemies.push({
+          type: spec.type,
+          health: this.getMaxHealthForType(spec.type),
+          spawnTime: 0,
+        });
+      }
+    }
+    this.totalEnemiesForWave += this.pendingEnemies.length;
+  }
+
+  setNightIntensity(value: number): void {
+    this.nightIntensity = Phaser.Math.Clamp(value, 0, 1);
+  }
+
+  private getCurrentSpawnIntervalMs(): number {
+    // Night spawns faster.
+    return Math.max(80, this.enemySpawnInterval * (1 - this.nightIntensity * 0.4));
+  }
+
+  private adjustHealthForNight(baseHealth: number): number {
+    // Night enemies are tougher.
+    return Math.ceil(baseHealth * (1 + this.nightIntensity * 0.45));
   }
 
   /**
@@ -280,7 +308,7 @@ export class WaveSystem {
    * Get current wave number
    */
   getCurrentWave(): number {
-    return this.currentWave;
+    return 1;
   }
 
   /**
@@ -294,33 +322,16 @@ export class WaveSystem {
    * Update wave system
    */
   update(deltaMs: number): void {
-    if (this.currentState === 'between_waves') {
-      this.betweenWaveAcc += deltaMs;
-      const betweenWaveConfig = getBetweenWaveConfig();
-      if (this.betweenWaveAcc >= betweenWaveConfig.delayBeforeNextWaveMs) {
-        this.initializeWave(this.currentWave + 1);
-      }
-      return;
-    }
-
-    if (this.currentState === 'completed') {
-      return;
-    }
-
     // Spawn pending enemies gradually with alive cap
     this.spawnAcc += deltaMs;
     while (
       this.pendingEnemies.length > 0 &&
-      this.spawnAcc >= this.enemySpawnInterval &&
+      this.spawnAcc >= this.getCurrentSpawnIntervalMs() &&
       this.getTotalAliveEnemies() < this.maxAliveAtOnce
     ) {
-      this.spawnAcc -= this.enemySpawnInterval;
+      this.spawnAcc -= this.getCurrentSpawnIntervalMs();
       const pending = this.pendingEnemies.shift()!;
-      this.spawnEnemy(pending.type, pending.health);
-      
-      if (this.pendingEnemies.length === 0) {
-        this.currentState = 'active';
-      }
+      this.spawnEnemy(pending.type, this.adjustHealthForNight(pending.health));
     }
 
     // Check for despawned enemies
@@ -350,22 +361,19 @@ export class WaveSystem {
     // Respawn despawned enemies gradually with same cap
     if (
       this.respawnQueue.length > 0 &&
-      this.spawnAcc >= this.enemySpawnInterval &&
+      this.spawnAcc >= this.getCurrentSpawnIntervalMs() &&
       this.getTotalAliveEnemies() < this.maxAliveAtOnce
     ) {
-      this.spawnAcc -= this.enemySpawnInterval;
+      this.spawnAcc -= this.getCurrentSpawnIntervalMs();
       const respawning = this.respawnQueue.shift()!;
-      this.spawnEnemy(respawning.type, respawning.health);
+      this.spawnEnemy(respawning.type, this.adjustHealthForNight(respawning.health));
     }
 
-    // Check wave completion
+    // Endless mode: always enqueue new enemies when pool is exhausted.
     const aliveCount = this.getTotalAliveEnemies();
     const pendingCount = this.getTotalRemainingToSpawn();
-
     if (aliveCount === 0 && pendingCount === 0) {
-      this.currentState = 'between_waves';
-      this.callbacks.onWaveCompleted?.(this.currentWave);
-      this.betweenWaveAcc = 0;
+      this.enqueueNextEndlessBatch();
     }
   }
 
@@ -395,7 +403,7 @@ export class WaveSystem {
         const wasDestroyed = e.takeDamage(bulletDamage);
         if (wasDestroyed) {
           const type = this.getEnemyType(e);
-          e.playDeathFade(this.callbacks.onEnemyDestroyed, () => {
+          e.playDeathFade((x, y) => this.callbacks.onEnemyDestroyed?.(x, y, type), () => {
             this.enemyPools[type].push(e);
           });
           this.waveEnemies.splice(i, 1);
@@ -446,6 +454,14 @@ export class WaveSystem {
     for (const e of this.waveEnemies) {
       if (e.isAlive()) {
         e.update(deltaMs);
+      }
+    }
+  }
+
+  addEnemyWorldOffset(dx: number, dy: number): void {
+    for (const e of this.waveEnemies) {
+      if (e.isAlive()) {
+        e.addWorldOffset(dx, dy);
       }
     }
   }

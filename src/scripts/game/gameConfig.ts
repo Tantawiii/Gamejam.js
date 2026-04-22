@@ -17,7 +17,10 @@ export const MAIN_TRAIN_SPAWN = {
   yFrac: 0.72,
   engineWidth: 78,
   engineHeight: 118,
-  cruiseSpeed: 52,
+  baseAcceleration: 110,
+  baseBrakeDeceleration: 210,
+  baseDragDeceleration: 46,
+  maxSpeed: 165,
   maxHealth: 800,
   coalMax: 120,
   startingCoal: 100,
@@ -36,6 +39,7 @@ export type MainTrainFleetConfig = {
   carriageWeaponSlots: number;
   /** Small Y offset from car top toward screen top (roof line). */
   turretRoofInsetY: number;
+  maxCarriages: number;
 };
 
 export const MAIN_TRAIN_FLEET: MainTrainFleetConfig = {
@@ -47,16 +51,19 @@ export const MAIN_TRAIN_FLEET: MainTrainFleetConfig = {
   engineWeaponSlots: 2,
   carriageWeaponSlots: 4,
   turretRoofInsetY: 3,
+  maxCarriages: 3,
 };
 
 export type MainTrainCoalConfig = {
-  baseDrainPerSec: number;
+  movementDrainPerSpeedPerSec: number;
+  accelerationDrainPerSec: number;
   drainPerWeaponPerSec: number;
   drainPerCarriagePerSec: number;
 };
 
 export const MAIN_TRAIN_COAL: MainTrainCoalConfig = {
-  baseDrainPerSec: 2.2,
+  movementDrainPerSpeedPerSec: 0.01,
+  accelerationDrainPerSec: 1.8,
   drainPerWeaponPerSec: 0.45,
   drainPerCarriagePerSec: 0.35,
 };
@@ -104,8 +111,8 @@ export const MAIN_COAL_PICKUP = {
 export const MAIN_WEAPON_VISUAL_DEPTH = 18;
 
 export const MAIN_CAMERA_SHAKE_ON_TRAIN_HIT = {
-  durationMs: 160,
-  intensity: 0.01,
+  durationMs: 70,
+  intensity: 0.0025,
 } as const;
 
 export const MAIN_TURRET_SYSTEM = {

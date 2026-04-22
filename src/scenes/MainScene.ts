@@ -18,6 +18,7 @@ import {
   MAIN_WORLD,
 } from '../scripts/game/gameConfig';
 import { CoalPickupManager } from '../scripts/pickups/CoalPickupManager';
+import { ExperiencePickupManager } from '../scripts/pickups/ExperiencePickupManager';
 import { PlayerController } from '../scripts/player/PlayerController';
 import { TrainController } from '../scripts/train/TrainController';
 import { TrainRidingController } from '../scripts/train/TrainRidingController';
@@ -37,6 +38,7 @@ export class MainScene extends Phaser.Scene {
   private turrets?: TrainTurretSystem;
   private waves?: WaveSystem;
   private coalPickups?: CoalPickupManager;
+  private expPickups?: ExperiencePickupManager;
   private hud?: GameplayHud;
   private engineSmoke?: Phaser.GameObjects.Particles.ParticleEmitter;
   private draft?: CardDraftSystem;
@@ -49,8 +51,18 @@ export class MainScene extends Phaser.Scene {
   private introHintText?: Phaser.GameObjects.Text;
   private introAutoTimer?: Phaser.Time.TimerEvent;
   private introTypeTimer?: Phaser.Time.TimerEvent;
+  private introCurrentLine = '';
+  private introTypedChars = 0;
+  private introPointerWasDown = false;
   private keyEsc?: Phaser.Input.Keyboard.Key;
+  private keyAccelerate?: Phaser.Input.Keyboard.Key;
+  private keyBrake?: Phaser.Input.Keyboard.Key;
   private wasPointerDown = false;
+  private nextTrainHitShakeAt = 0;
+  private nightTint?: Phaser.GameObjects.Rectangle;
+  private dayNightCycleMs = 0;
+  private hasShownFirstNightWarning = false;
+  private readonly dayNightCycleDurationMs = 220000;
   private readonly introDialogue: Array<{ speaker: 'Dad' | 'Son'; text: string }> = [
     {
       speaker: 'Son',
@@ -80,6 +92,9 @@ export class MainScene extends Phaser.Scene {
 
   /** Wire your future card UI: pity bonus via {@link CardPityState.getCartOfferWeightBonus}. */
   readonly cardPity = new CardPityState();
+  private playerLevel = 1;
+  private currentExp = 0;
+  private expectedExp = 1500;
 
   constructor() {
     super('MainScene');
@@ -91,6 +106,11 @@ export class MainScene extends Phaser.Scene {
       depth: -1000,
       layers: MAIN_PARALLAX_LAYERS,
     });
+    this.nightTint = this.add
+      .rectangle(0, 0, this.scale.width, this.scale.height, 0x0b1220, 0)
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(6800);
 
     const startX = MAIN_WORLD.width * MAIN_TRAIN_SPAWN.xFrac;
     const startY = MAIN_WORLD.height * MAIN_TRAIN_SPAWN.yFrac;
@@ -100,7 +120,10 @@ export class MainScene extends Phaser.Scene {
       y: startY,
       engineWidth: MAIN_TRAIN_SPAWN.engineWidth,
       engineHeight: MAIN_TRAIN_SPAWN.engineHeight,
-      cruiseSpeed: MAIN_TRAIN_SPAWN.cruiseSpeed,
+      baseAcceleration: MAIN_TRAIN_SPAWN.baseAcceleration,
+      baseBrakeDeceleration: MAIN_TRAIN_SPAWN.baseBrakeDeceleration,
+      baseDragDeceleration: MAIN_TRAIN_SPAWN.baseDragDeceleration,
+      maxSpeed: MAIN_TRAIN_SPAWN.maxSpeed,
       maxHealth: MAIN_TRAIN_SPAWN.maxHealth,
       coalMax: MAIN_TRAIN_SPAWN.coalMax,
       startingCoal: MAIN_TRAIN_SPAWN.startingCoal,
@@ -142,8 +165,11 @@ export class MainScene extends Phaser.Scene {
     this.riding = new TrainRidingController(train, player, keyRide);
     this.riding.setRiding(true);
     this.keyEsc = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.keyAccelerate = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.W);
+    this.keyBrake = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.S);
 
     this.coalPickups = new CoalPickupManager(this, MAIN_COAL_PICKUP);
+    this.expPickups = new ExperiencePickupManager(this);
 
     this.waves = new WaveSystem(
       this,
@@ -160,10 +186,10 @@ export class MainScene extends Phaser.Scene {
         },
         onWaveCompleted: (waveNumber) => {
           this.hud?.onWaveCompleted(waveNumber);
-          this.startCardDraft();
         },
-        onEnemyDestroyed: (x, y) => {
+        onEnemyDestroyed: (x, y, type) => {
           this.coalPickups?.spawn(x, y, 6);
+          this.expPickups?.spawn(x, y, this.rollExpDrop(type));
         },
         onEnemyDespawned: () => {
           // Enemy went off-screen and is being respawned
@@ -180,11 +206,11 @@ export class MainScene extends Phaser.Scene {
     this.engineSmoke = createGreySmokeVfx(this, {
       x: train.body.x,
       y: train.body.y,
-      depth: MAIN_WEAPON_VISUAL_DEPTH + 3,
-      alpha: 0.88,
+      depth: MAIN_TRAIN_SPAWN.depth + 30,
+      alpha: 0.92,
       follow: train.body,
       followOffsetX: 0,
-      followOffsetY: -train.body.height * 0.3,
+      followOffsetY: -train.body.height * 0.55,
     });
 
     this.hud = new GameplayHud(this);
@@ -206,6 +232,102 @@ export class MainScene extends Phaser.Scene {
       this.placementPrompt = undefined;
       this.introAutoTimer?.destroy();
       this.introTypeTimer?.destroy();
+      this.expPickups?.destroy();
+      this.nightTint?.destroy();
+    });
+  }
+
+  private rollExpDrop(type: 'basic' | 'bomb' | 'chunky'): number {
+    switch (type) {
+      case 'basic':
+        return Phaser.Math.Between(20, 25);
+      case 'bomb':
+        return Phaser.Math.Between(30, 35);
+      case 'chunky':
+        return Phaser.Math.Between(50, 55);
+    }
+  }
+
+  private gainExperience(amount: number): void {
+    if (amount <= 0) return;
+    this.currentExp += amount;
+    if (this.currentExp >= this.expectedExp) {
+      this.playerLevel += 1;
+      this.expectedExp = Math.ceil(this.expectedExp * 2);
+      this.currentExp = 0;
+      this.startCardDraft();
+    }
+  }
+
+  private showExpGainText(x: number, y: number, amount: number): void {
+    const t = this.add
+      .text(x, y - 14, `+${Math.floor(amount)} EXP`, {
+        fontFamily: 'system-ui, Segoe UI, Roboto, sans-serif',
+        fontSize: '18px',
+        color: '#7ee787',
+        stroke: '#0f1720',
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5)
+      .setDepth(9000);
+    this.tweens.add({
+      targets: t,
+      y: y - 52,
+      alpha: 0,
+      duration: 900,
+      ease: 'Sine.Out',
+      onComplete: () => t.destroy(),
+    });
+  }
+
+  private showFuelGainText(x: number, y: number, amount: number): void {
+    const t = this.add
+      .text(x, y - 10, `+${Math.floor(amount)} Fuel`, {
+        fontFamily: 'system-ui, Segoe UI, Roboto, sans-serif',
+        fontSize: '17px',
+        color: '#f2cc60',
+        stroke: '#0f1720',
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5)
+      .setDepth(9000);
+    this.tweens.add({
+      targets: t,
+      y: y - 44,
+      alpha: 0,
+      duration: 850,
+      ease: 'Sine.Out',
+      onComplete: () => t.destroy(),
+    });
+  }
+
+  private computeNightStrength(): number {
+    this.dayNightCycleMs += this.game.loop.delta;
+    const phase =
+      ((this.dayNightCycleMs % this.dayNightCycleDurationMs) / this.dayNightCycleDurationMs) *
+      Math.PI *
+      2;
+    return (1 - Math.cos(phase)) * 0.5;
+  }
+
+  private showNightWarningBubble(): void {
+    const text = "Uh... night's here. Enemies get angry after dark. Great. Super great.";
+    const bubble = this.createSpeechBubble(54, this.scale.height - 220, 700, 150, 'Dad');
+    bubble.content.setText(text);
+    const c = bubble.container.setScrollFactor(0).setDepth(7050).setAlpha(0);
+    this.tweens.add({
+      targets: c,
+      alpha: 1,
+      duration: 250,
+      yoyo: false,
+    });
+    this.time.delayedCall(5200, () => {
+      this.tweens.add({
+        targets: c,
+        alpha: 0,
+        duration: 450,
+        onComplete: () => c.destroy(),
+      });
     });
   }
 
@@ -235,6 +357,42 @@ export class MainScene extends Phaser.Scene {
         kind: 'train',
       },
       {
+        id: 'train-accel',
+        label: 'Boiler Overdrive',
+        description: '+18% train acceleration.',
+        kind: 'train',
+      },
+      {
+        id: 'train-speed',
+        label: 'Wheels Tuning',
+        description: '+18 max train speed.',
+        kind: 'train',
+      },
+      {
+        id: 'train-health-refill',
+        label: 'Repair Crew',
+        description: 'Refill 140 train HP.',
+        kind: 'train',
+      },
+      {
+        id: 'train-fuel-max',
+        label: 'Bigger Bunker',
+        description: '+35 max fuel and refill by 35.',
+        kind: 'train',
+      },
+      {
+        id: 'train-fuel-refill',
+        label: 'Fuel Depot',
+        description: 'Refill 70 fuel.',
+        kind: 'train',
+      },
+      {
+        id: 'train-magnet',
+        label: 'Magnet Ring',
+        description: '+24 pickup magnet range.',
+        kind: 'train',
+      },
+      {
         id: 'weapon-cannon',
         label: 'Cannon Mk+',
         description: 'Upgrade Cannon. If absent, place a new Cannon.',
@@ -242,9 +400,16 @@ export class MainScene extends Phaser.Scene {
         weaponType: 'cannon',
       },
       {
+        id: 'weapon-bomb',
+        label: 'Bomb Thrower',
+        description: 'Upgrade Bomb Thrower. If absent, place a new one.',
+        kind: 'weapon',
+        weaponType: 'bomb',
+      },
+      {
         id: 'weapon-sniper',
         label: 'Rail Sniper',
-        description: 'Upgrade Sniper. If absent, place a new Sniper.',
+        description: 'Upgrade Sniper. If absent, place a new one.',
         kind: 'weapon',
         weaponType: 'sniper',
       },
@@ -255,8 +420,32 @@ export class MainScene extends Phaser.Scene {
         kind: 'weapon',
         weaponType: 'scatter',
       },
+      {
+        id: 'weapon-damage',
+        label: 'High Explosives',
+        description: '+18% weapon damage.',
+        kind: 'weapon',
+      },
+      {
+        id: 'weapon-range',
+        label: 'Long Barrel',
+        description: '+14% weapon range.',
+        kind: 'weapon',
+      },
+      {
+        id: 'weapon-speed',
+        label: 'Rapid Feed',
+        description: '+14% weapon attack speed.',
+        kind: 'weapon',
+      },
+      {
+        id: 'weapon-rotation',
+        label: 'Servo Ring',
+        description: '+15% turret rotation speed.',
+        kind: 'weapon',
+      },
     ];
-    if (includeCart && train) {
+    if (includeCart && train && train.getCarriageCount() < train.getMaxCarriageCount()) {
       pool.push({
         id: 'train-cart',
         label: 'New Cart',
@@ -302,8 +491,38 @@ export class MainScene extends Phaser.Scene {
       case 'train-armor':
         this.train.addMaxHealth(70);
         break;
+      case 'train-accel':
+        this.train.addAccelerationMultiplier(0.18);
+        break;
+      case 'train-speed':
+        this.train.addMaxSpeed(18);
+        break;
+      case 'train-health-refill':
+        this.train.refillHealth(140);
+        break;
+      case 'train-fuel-max':
+        this.train.addMaxFuel(35);
+        break;
+      case 'train-fuel-refill':
+        this.train.addCoal(70);
+        break;
+      case 'train-magnet':
+        this.coalPickups?.addMagnetRange(24);
+        break;
       case 'train-cart':
         this.addCarriageFromCard();
+        break;
+      case 'weapon-damage':
+        this.turrets.addDamageMultiplier(0.18);
+        break;
+      case 'weapon-range':
+        this.turrets.addRangeMultiplier(0.14);
+        break;
+      case 'weapon-speed':
+        this.turrets.addAttackSpeedMultiplier(0.14);
+        break;
+      case 'weapon-rotation':
+        this.turrets.addRotationSpeedMultiplier(0.15);
         break;
       default:
         break;
@@ -368,7 +587,7 @@ export class MainScene extends Phaser.Scene {
 
     this.introHintText?.destroy();
     this.introHintText = this.add
-      .text(width * 0.5, height - 8, 'Auto dialogue... ESC to skip', {
+      .text(width * 0.5, height - 8, 'Click to continue • Auto dialogue • ESC to skip', {
         fontFamily: 'system-ui, Segoe UI, Roboto, sans-serif',
         fontSize: '16px',
         color: '#d1d5db',
@@ -382,7 +601,8 @@ export class MainScene extends Phaser.Scene {
   private startTypewriter(line: string): void {
     const content = this.introBubbleText;
     if (!content) return;
-    let idx = 0;
+    this.introCurrentLine = line;
+    this.introTypedChars = 0;
     this.introTypeTimer = this.time.addEvent({
       delay: 26,
       loop: true,
@@ -392,9 +612,9 @@ export class MainScene extends Phaser.Scene {
           this.introTypeTimer = undefined;
           return;
         }
-        idx += 1;
-        content.setText(line.slice(0, idx));
-        if (idx >= line.length) {
+        this.introTypedChars += 1;
+        content.setText(line.slice(0, this.introTypedChars));
+        if (this.introTypedChars >= line.length) {
           this.introTypeTimer?.destroy();
           this.introTypeTimer = undefined;
           this.introAutoTimer = this.time.delayedCall(3000, () =>
@@ -403,6 +623,29 @@ export class MainScene extends Phaser.Scene {
         }
       },
     });
+  }
+
+  private revealCurrentIntroLineImmediately(): void {
+    if (!this.introCutsceneActive || !this.introBubbleText) return;
+    this.introTypeTimer?.destroy();
+    this.introTypeTimer = undefined;
+    this.introBubbleText.setText(this.introCurrentLine);
+    this.introTypedChars = this.introCurrentLine.length;
+    this.introAutoTimer?.destroy();
+    this.introAutoTimer = this.time.delayedCall(3000, () =>
+      this.advanceIntroDialogue(),
+    );
+  }
+
+  private handleIntroClickAdvance(): void {
+    if (!this.introCutsceneActive) return;
+    if (this.introTypeTimer) {
+      this.revealCurrentIntroLineImmediately();
+      return;
+    }
+    this.introAutoTimer?.destroy();
+    this.introAutoTimer = undefined;
+    this.advanceIntroDialogue();
   }
 
   private createSpeechBubble(
@@ -489,14 +732,24 @@ export class MainScene extends Phaser.Scene {
    * When a card grants a new carriage: extends the train and rebuilds turrets (4 guns per carriage).
    */
   addCarriageFromCard(): void {
-    this.train?.addCarriage();
-    if (this.train && this.turrets) {
+    const added = this.train?.addCarriage() ?? false;
+    if (added && this.train && this.turrets) {
       this.turrets.rebuildFromTrain(this.train);
     }
   }
 
   override update(_time: number, delta: number): void {
     const cam = this.cameras.main;
+    const ptr = this.input.activePointer;
+    if (this.introCutsceneActive) {
+      const justPressedIntro = ptr.isDown && !this.introPointerWasDown;
+      if (justPressedIntro) {
+        this.handleIntroClickAdvance();
+      }
+      this.introPointerWasDown = ptr.isDown;
+    } else {
+      this.introPointerWasDown = false;
+    }
     if (this.keyEsc && Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
       this.finishIntroCutscene();
     }
@@ -512,7 +765,6 @@ export class MainScene extends Phaser.Scene {
     const cardsActive = !!this.pendingPlacementWeapon || (this.draft?.isActive() ?? false);
 
     if (this.pendingPlacementWeapon && this.train && this.turrets) {
-      const ptr = this.input.activePointer;
       const justPressed = ptr.isDown && !this.wasPointerDown;
       if (justPressed) {
         const worldPoint = cam.getWorldPoint(ptr.x, ptr.y);
@@ -535,49 +787,96 @@ export class MainScene extends Phaser.Scene {
 
     const ridingNow = this.riding?.isRiding() ?? false;
     const train = this.train;
-    const coalOk = train?.hasCoal() ?? false;
+    const coalOkBeforeStep = train?.hasCoal() ?? false;
 
     const shouldCruise = this.introCutsceneActive
       ? true
       : !gameplayLocked && ridingNow;
     this.train?.setCruising(shouldCruise);
-    if (shouldCruise && (coalOk || this.introCutsceneActive)) {
-      this.parallax?.update(delta);
+    if (train) {
+      const accelerating = shouldCruise && (this.keyAccelerate?.isDown ?? false);
+      const braking = shouldCruise && (this.keyBrake?.isDown ?? false);
+      const throttle = accelerating ? 1 : braking ? -1 : 0;
+      train.setThrottle(throttle);
+    }
+    if (shouldCruise && (coalOkBeforeStep || this.introCutsceneActive)) {
+      const speedRatio = train ? train.getSpeed() / Math.max(1, train.getMaxSpeed()) : 0;
+      const parallaxScale = this.introCutsceneActive ? 1 : 0.7 + speedRatio * 1.9;
+      this.parallax?.update(delta, parallaxScale);
     }
     this.train?.update(delta);
+    const coalOk = train?.hasCoal() ?? false;
 
     if (!cardsActive) {
       this.riding?.updatePlayerMotion(delta, cam);
     }
 
     const waves = this.waves;
+    const nightStrength = this.computeNightStrength();
+    this.nightTint?.setAlpha(0.62 * nightStrength);
+    waves?.setNightIntensity(nightStrength);
+    if (!this.hasShownFirstNightWarning && nightStrength > 0.72 && !this.introCutsceneActive) {
+      this.hasShownFirstNightWarning = true;
+      this.showNightWarningBubble();
+    }
     if (this.introCutsceneActive && train && waves) {
       this.turrets?.update(delta, train, waves, false);
     } else if (!cardsActive && train && waves) {
       waves.update(delta);
       waves.updateEnemies(delta);
+      const acceleratingFactor = Math.max(0, train.getThrottle());
+      if (acceleratingFactor > 0.01 && ridingNow) {
+        const dt = delta / 1000;
+        const speedRatio = train.getSpeed() / Math.max(1, train.getMaxSpeed());
+        const passBySpeed = (80 + 240 * speedRatio) * acceleratingFactor;
+        waves.addEnemyWorldOffset(0, passBySpeed * dt);
+      }
       const hulls = train.getHullRects();
       waves.updateCollisions(hulls, () => {
-        const s = MAIN_CAMERA_SHAKE_ON_TRAIN_HIT;
-        this.cameras.main.shake(s.durationMs, s.intensity, true);
+        if (this.time.now >= this.nextTrainHitShakeAt) {
+          const s = MAIN_CAMERA_SHAKE_ON_TRAIN_HIT;
+          this.cameras.main.shake(s.durationMs, s.intensity, true);
+          this.nextTrainHitShakeAt = this.time.now + 120;
+        }
       });
-      this.turrets?.update(delta, train, waves, coalOk);
+      const shots = this.turrets?.update(delta, train, waves, coalOk) ?? 0;
+      if (shots > 0 && coalOk) {
+        train.spendCoal(shots * 0.24);
+      }
       this.hud?.updateWaveInfo(waves);
     }
 
     const player = this.player;
     if (!this.introCutsceneActive && train && this.coalPickups && player) {
-      this.coalPickups.update(
+      const fuelGained = this.coalPickups.update(
         delta,
         player.sprite.x,
         player.sprite.y,
         MAIN_PLAYER_VISUAL.radius,
         train,
       );
+      if (fuelGained > 0) {
+        this.showFuelGainText(player.sprite.x, player.sprite.y, fuelGained);
+      }
+      const gained = this.expPickups?.update(
+        delta,
+        player.sprite.x,
+        player.sprite.y,
+        MAIN_PLAYER_VISUAL.radius,
+        this.coalPickups.getMagnetRange(),
+      ) ?? 0;
+      if (gained > 0) {
+        this.gainExperience(gained);
+        this.showExpGainText(player.sprite.x, player.sprite.y, gained);
+      }
     }
 
     if (!this.introCutsceneActive && train && this.hud) {
-      this.hud.update(train, ridingNow);
+      this.hud.update(train, ridingNow, {
+        level: this.playerLevel,
+        currentExp: this.currentExp,
+        expectedExp: this.expectedExp,
+      });
     }
   }
 }

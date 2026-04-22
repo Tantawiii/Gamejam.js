@@ -214,6 +214,11 @@ export abstract class Enemy implements Damageable {
     return { x: this.sprite.x, y: this.sprite.y };
   }
 
+  addWorldOffset(dx: number, dy: number): void {
+    this.sprite.setPosition(this.sprite.x + dx, this.sprite.y + dy);
+    this.updateHealthBarPosition();
+  }
+
   /**
    * Get the enemy's radius for collision detection.
    */

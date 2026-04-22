@@ -6,7 +6,10 @@ export type TrainControllerOptions = {
   y: number;
   engineWidth: number;
   engineHeight: number;
-  cruiseSpeed: number;
+  baseAcceleration: number;
+  baseBrakeDeceleration: number;
+  baseDragDeceleration: number;
+  maxSpeed: number;
   maxHealth: number;
   coalMax: number;
   startingCoal: number;
@@ -31,7 +34,13 @@ type FleetPart = {
 export class TrainController {
   private readonly scene: Phaser.Scene;
   private readonly parts: FleetPart[] = [];
-  private cruiseSpeed: number;
+  private baseAcceleration: number;
+  private baseBrakeDeceleration: number;
+  private baseDragDeceleration: number;
+  private accelerationMultiplier = 1;
+  private maxSpeed: number;
+  private speed = 0;
+  private throttle = 0;
   private movementEnabled = true;
   private cruising = false;
   private coalConsumptionEnabled = true;
@@ -46,13 +55,16 @@ export class TrainController {
   readonly boardingRadius: number;
 
   coal: number;
-  readonly coalMax: number;
+  coalMax: number;
 
   private readonly baseDepth: number;
 
   constructor(scene: Phaser.Scene, options: TrainControllerOptions) {
     this.scene = scene;
-    this.cruiseSpeed = options.cruiseSpeed;
+    this.baseAcceleration = options.baseAcceleration;
+    this.baseBrakeDeceleration = options.baseBrakeDeceleration;
+    this.baseDragDeceleration = options.baseDragDeceleration;
+    this.maxSpeed = options.maxSpeed;
     this.maxHealth = options.maxHealth;
     this.health = options.maxHealth;
     this.boardingRadius = options.boardingRadius ?? 96;
@@ -82,7 +94,10 @@ export class TrainController {
   }
 
   /** Extra carriages below the engine (from card rewards). */
-  addCarriage(): void {
+  addCarriage(): boolean {
+    if (this.getCarriageCount() >= this.fleetCfg.maxCarriages) {
+      return false;
+    }
     const last = this.parts[this.parts.length - 1]!.rect;
     const gap = this.fleetCfg.carriageGap;
     const h = this.fleetCfg.carriageHeight;
@@ -99,6 +114,7 @@ export class TrainController {
     r.setStrokeStyle(2, this.fleetCfg.carriageStrokeColor);
     r.setDepth(this.baseDepth);
     this.parts.push({ rect: r, isEngine: false });
+    return true;
   }
 
   getCarriageCount(): number {
@@ -112,6 +128,10 @@ export class TrainController {
     );
   }
 
+  getMaxCarriageCount(): number {
+    return this.fleetCfg.maxCarriages;
+  }
+
   hasCoal(): boolean {
     return this.coal > 0;
   }
@@ -121,18 +141,65 @@ export class TrainController {
     this.coal = Math.min(this.coalMax, this.coal + amount);
   }
 
+  spendCoal(amount: number): void {
+    if (amount <= 0) return;
+    this.coal = Math.max(0, this.coal - amount);
+  }
+
   addMaxHealth(amount: number): void {
     if (amount <= 0) return;
     this.maxHealth += amount;
     this.health = Math.min(this.maxHealth, this.health + amount);
   }
 
+  refillHealth(amount: number): void {
+    if (amount <= 0) return;
+    this.health = Math.min(this.maxHealth, this.health + amount);
+  }
+
+  addMaxFuel(amount: number): void {
+    if (amount <= 0) return;
+    this.coalMax += amount;
+    this.coal = Math.min(this.coalMax, this.coal + amount);
+  }
+
+  setThrottle(value: number): void {
+    this.throttle = Phaser.Math.Clamp(value, -1, 1);
+  }
+
+  getSpeed(): number {
+    return this.speed;
+  }
+
+  getMaxSpeed(): number {
+    return this.maxSpeed;
+  }
+
+  getThrottle(): number {
+    return this.throttle;
+  }
+
+  addMaxSpeed(amount: number): void {
+    if (amount <= 0) return;
+    this.maxSpeed += amount;
+  }
+
+  addAccelerationMultiplier(amount: number): void {
+    if (amount <= 0) return;
+    this.accelerationMultiplier += amount;
+  }
+
   private computeCoalDrainPerSec(): number {
-    const w = this.getActiveWeaponCount();
     const carts = this.getCarriageCount();
+    const speedRatio = this.maxSpeed > 0 ? this.speed / this.maxSpeed : 0;
+    const accelerationDrain =
+      this.throttle > 0.05
+        ? this.coalCfg.accelerationDrainPerSec * this.throttle * (1 + speedRatio * 1.3)
+        : 0;
+    const movementDrain = this.coalCfg.movementDrainPerSpeedPerSec * this.speed;
     return (
-      this.coalCfg.baseDrainPerSec +
-      w * this.coalCfg.drainPerWeaponPerSec +
+      movementDrain +
+      accelerationDrain +
       carts * this.coalCfg.drainPerCarriagePerSec
     );
   }
@@ -169,10 +236,6 @@ export class TrainController {
     }
 
     return out;
-  }
-
-  setCruiseSpeed(speed: number): void {
-    this.cruiseSpeed = speed;
   }
 
   setMovementEnabled(on: boolean): void {
@@ -218,19 +281,38 @@ export class TrainController {
   }
 
   update(deltaMs: number): void {
-    if (!this.movementEnabled || this.isDestroyed || !this.cruising) return;
-    if (this.coal <= 0) return;
+    if (!this.movementEnabled || this.isDestroyed || !this.cruising) {
+      this.speed = 0;
+      return;
+    }
+    if (this.coal <= 0) {
+      this.speed = 0;
+      return;
+    }
 
     const dt = deltaMs / 1000;
+    const accel = this.baseAcceleration * this.accelerationMultiplier;
+    const brake = this.baseBrakeDeceleration;
+    const drag = this.baseDragDeceleration;
+    if (this.throttle > 0.05) {
+      this.speed = Math.min(this.maxSpeed, this.speed + accel * this.throttle * dt);
+    } else if (this.throttle < -0.05) {
+      this.speed = Math.max(0, this.speed - brake * (-this.throttle) * dt);
+    } else {
+      this.speed = Math.max(0, this.speed - drag * dt);
+    }
+
     if (this.coalConsumptionEnabled) {
       const drain = this.computeCoalDrainPerSec() * dt;
       this.coal = Math.max(0, this.coal - drain);
+      if (this.coal <= 0) {
+        this.speed = 0;
+        return;
+      }
     }
 
-    const dy = -this.cruiseSpeed * dt;
-    for (const p of this.parts) {
-      p.rect.y += dy;
-    }
+    // Keep train fixed in world space so it remains screen-centered; movement feel
+    // comes from speed-scaled background motion and enemy flow.
   }
 
   destroy(): void {

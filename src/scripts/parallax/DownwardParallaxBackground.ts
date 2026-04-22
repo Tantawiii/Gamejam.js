@@ -69,10 +69,10 @@ export class DownwardParallaxBackground {
     });
   }
 
-  update(deltaMs: number): void {
+  update(deltaMs: number, speedScale = 1): void {
     const dt = deltaMs / 1000;
     for (const { tile, speed } of this.layers) {
-      tile.tilePositionY -= speed * dt;
+      tile.tilePositionY -= speed * Math.max(0, speedScale) * dt;
     }
   }
 

@@ -1,7 +1,7 @@
 import * as Phaser from 'phaser';
 import type { TrainController } from './TrainController';
 
-export type WeaponType = 'cannon' | 'sniper' | 'scatter';
+export type WeaponType = 'cannon' | 'sniper' | 'scatter' | 'bomb';
 
 type EnemyTargetingSystem = {
   findClosestLivingEnemyTo(wx: number, wy: number): { x: number; y: number } | null;
@@ -19,6 +19,7 @@ type Bullet = {
   vy: number;
   lifeMs: number;
   damage: number;
+  radius: number;
 };
 
 type WeaponSlot = {
@@ -44,6 +45,11 @@ export class TrainTurretSystem {
   private readonly depth: number;
   private readonly firingRange: number;
   private readonly slotWeapons: Array<WeaponSlot | null> = [];
+  private damageMultiplier = 1;
+  private rangeMultiplier = 1;
+  private attackSpeedMultiplier = 1;
+  private rotationSpeedMultiplier = 1;
+  private readonly baseRotationSpeedRadPerSec = Phaser.Math.DegToRad(220);
 
   constructor(
     scene: Phaser.Scene,
@@ -112,35 +118,54 @@ export class TrainTurretSystem {
       case 'cannon':
         return {
           color: 0xc9d1d9,
-          interval: this.fireIntervalMs / levelScale,
+          interval: this.fireIntervalMs / (levelScale * this.attackSpeedMultiplier),
           bulletSpeed: this.bulletSpeed,
           bulletLifeMs: this.bulletLifeMs,
-          range: this.firingRange,
-          damage: 30 * levelScale,
+          range: this.firingRange * this.rangeMultiplier,
+          damage: 30 * levelScale * this.damageMultiplier,
           pellets: 1,
           spreadRad: 0,
+          radiusScale: 1,
         };
       case 'sniper':
         return {
           color: 0x8bd5ff,
-          interval: (this.fireIntervalMs * 1.45) / levelScale,
+          interval:
+            (this.fireIntervalMs * 1.45) /
+            (levelScale * this.attackSpeedMultiplier),
           bulletSpeed: this.bulletSpeed * 1.55,
           bulletLifeMs: this.bulletLifeMs * 1.5,
-          range: this.firingRange * 1.55,
-          damage: 55 * levelScale,
+          range: this.firingRange * 1.55 * this.rangeMultiplier,
+          damage: 55 * levelScale * this.damageMultiplier,
           pellets: 1,
           spreadRad: 0,
+          radiusScale: 1,
         };
       case 'scatter':
         return {
           color: 0xffc266,
-          interval: (this.fireIntervalMs * 0.92) / levelScale,
+          interval:
+            (this.fireIntervalMs * 0.92) /
+            (levelScale * this.attackSpeedMultiplier),
           bulletSpeed: this.bulletSpeed * 0.9,
           bulletLifeMs: this.bulletLifeMs * 0.72,
-          range: this.firingRange * 0.8,
-          damage: 14 * levelScale,
+          range: this.firingRange * 0.8 * this.rangeMultiplier,
+          damage: 14 * levelScale * this.damageMultiplier,
           pellets: 3,
           spreadRad: Phaser.Math.DegToRad(10),
+          radiusScale: 1,
+        };
+      case 'bomb':
+        return {
+          color: 0xff6b4a,
+          interval: (this.fireIntervalMs * 1.8) / (levelScale * this.attackSpeedMultiplier),
+          bulletSpeed: this.bulletSpeed * 0.66,
+          bulletLifeMs: this.bulletLifeMs * 1.35,
+          range: this.firingRange * 1.1 * this.rangeMultiplier,
+          damage: 90 * levelScale * this.damageMultiplier,
+          pellets: 1,
+          spreadRad: 0,
+          radiusScale: 1.8,
         };
     }
   }
@@ -206,12 +231,33 @@ export class TrainTurretSystem {
     return false;
   }
 
+  addDamageMultiplier(amount: number): void {
+    if (amount <= 0) return;
+    this.damageMultiplier += amount;
+  }
+
+  addRangeMultiplier(amount: number): void {
+    if (amount <= 0) return;
+    this.rangeMultiplier += amount;
+  }
+
+  addAttackSpeedMultiplier(amount: number): void {
+    if (amount <= 0) return;
+    this.attackSpeedMultiplier += amount;
+  }
+
+  addRotationSpeedMultiplier(amount: number): void {
+    if (amount <= 0) return;
+    this.rotationSpeedMultiplier += amount;
+  }
+
   update(
     deltaMs: number,
     train: TrainController,
     enemies: EnemyTargetingSystem,
     canFire: boolean,
-  ): void {
+  ): number {
+    let shotsFired = 0;
     const mounts = train.getTurretWorldPositions();
     if (mounts.length !== this.guns.length) {
       this.rebuildFromTrain(train);
@@ -241,7 +287,9 @@ export class TrainTurretSystem {
       const distance = Math.hypot(dx, dy);
 
       const ang = Math.atan2(dy, dx);
-      gun.setRotation(ang);
+      const maxStep =
+        this.baseRotationSpeedRadPerSec * this.rotationSpeedMultiplier * (deltaMs / 1000);
+      gun.setRotation(Phaser.Math.Angle.RotateTo(gun.rotation, ang, maxStep));
 
       if (!canFire) {
         continue;
@@ -276,7 +324,7 @@ export class TrainTurretSystem {
         const g = this.scene.add.circle(
           tipX,
           tipY,
-          this.bulletRadius,
+          this.bulletRadius * stats.radiusScale,
           stats.color ?? this.bulletColor,
           1,
         );
@@ -287,11 +335,14 @@ export class TrainTurretSystem {
           vy,
           lifeMs: stats.bulletLifeMs,
           damage: stats.damage,
+          radius: this.bulletRadius * stats.radiusScale,
         });
+        shotsFired += 1;
       }
     }
 
     this.updateBullets(deltaMs, enemies);
+    return shotsFired;
   }
 
   private updateBullets(deltaMs: number, enemies: EnemyTargetingSystem): void {
@@ -318,7 +369,7 @@ export class TrainTurretSystem {
       // Only hit enemies if bullet is within camera bounds
       const isOnScreen = nx >= camX && nx <= camX + camW && ny >= camY && ny <= camY + camH;
       if (isOnScreen) {
-        const hit = enemies.tryHitEnemyWithBullet(nx, ny, this.bulletRadius, b.damage);
+        const hit = enemies.tryHitEnemyWithBullet(nx, ny, b.radius, b.damage);
         if (hit) {
           b.graphic.destroy();
           this.bullets.splice(i, 1);

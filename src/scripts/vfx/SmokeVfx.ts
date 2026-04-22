@@ -26,10 +26,10 @@ export function createGreySmokeVfx(
     angle: { min: -102, max: -78 },
     scale: { start: 1.15, end: 0.08, ease: 'sine.out' },
     speed: { min: 95, max: 165 },
-    alpha: { start: config.alpha ?? 0.82, end: 0 },
+    alpha: { start: config.alpha ?? 0.9, end: 0 },
     quantity: 3,
-    frequency: 36,
-    blendMode: 'ADD',
+    frequency: 32,
+    blendMode: 'NORMAL',
   });
 
   if (typeof config.depth === 'number') {

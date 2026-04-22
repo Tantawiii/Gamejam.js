@@ -20,6 +20,9 @@ export class GameplayHud {
   private waveStartAlpha: number = 1;
   private betweenWaveTimer: number = 0;
   private visible = true;
+  private playerLevel = 1;
+  private currentExp = 0;
+  private expectedExp = 100;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -91,12 +94,22 @@ export class GameplayHud {
       .setAlpha(0);
   }
 
-  update(train: TrainController, ridingTrain: boolean): void {
+  update(
+    train: TrainController,
+    ridingTrain: boolean,
+    progression?: { level: number; currentExp: number; expectedExp: number },
+  ): void {
     if (!this.visible) return;
 
     const c = this.cfg;
     const hpFrac = train.maxHealth > 0 ? train.health / train.maxHealth : 0;
     const coalFrac = train.coalMax > 0 ? train.coal / train.coalMax : 0;
+    if (progression) {
+      this.playerLevel = progression.level;
+      this.currentExp = progression.currentExp;
+      this.expectedExp = Math.max(1, progression.expectedExp);
+    }
+    const expFrac = this.currentExp / this.expectedExp;
 
     const g = this.gfx;
     g.clear();
@@ -112,14 +125,21 @@ export class GameplayHud {
     g.fillStyle(c.coalFg, 1);
     g.fillRect(c.x, cy, c.width * Math.max(0, Math.min(1, coalFrac)), c.height);
 
+    const ey = cy + c.height + c.gap;
+    g.fillStyle(0x223042, 1);
+    g.fillRect(c.x, ey, c.width, c.height);
+    g.fillStyle(0x58a6ff, 1);
+    g.fillRect(c.x, ey, c.width * Math.max(0, Math.min(1, expFrac)), c.height);
+
     const motion =
       !train.hasCoal() && ridingTrain
         ? 'No coal — train stopped'
         : ridingTrain
-          ? 'Riding — moving / firing needs coal'
+          ? 'Riding — W accelerate, S brake'
           : 'On foot — board engine (E)';
+    const carts = `${train.getCarriageCount()}/${train.getMaxCarriageCount()}`;
     this.text.setText(
-      `WASD · E board / leave (engine only)\nTrain HP ${Math.ceil(train.health)}/${train.maxHealth} · Coal ${Math.ceil(train.coal)}/${train.coalMax}\n${motion}`,
+      `WASD · E board/leave (engine only)\nTrain HP ${Math.ceil(train.health)}/${train.maxHealth} · Fuel ${Math.ceil(train.coal)}/${train.coalMax}\nEXP Lv.${this.playerLevel} ${Math.floor(this.currentExp)}/${Math.floor(this.expectedExp)}\nSpeed ${Math.ceil(train.getSpeed())}/${Math.ceil(train.getMaxSpeed())} · Carts ${carts}\n${motion}`,
     );
   }
 
@@ -174,7 +194,7 @@ export class GameplayHud {
     const remainingCount = waves.getTotalRemainingToSpawn();
 
     if (this.waveInfoText) {
-      this.waveInfoText.setText(`Wave ${waves.getCurrentWave()}\nEnemies: ${aliveCount} alive\nRemaining: ${remainingCount}`);
+      this.waveInfoText.setText(`Endless Run\nEnemies: ${aliveCount} alive\nIncoming: ${remainingCount}`);
     }
 
     // Handle between-wave display
