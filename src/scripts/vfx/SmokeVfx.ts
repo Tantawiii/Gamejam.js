@@ -19,10 +19,11 @@ export function createGreySmokeVfx(
   config: GreySmokeVfxConfig,
 ): Phaser.GameObjects.Particles.ParticleEmitter {
   if (!scene.textures.exists('smoke_particle')) {
-    const graphics = scene.make.graphics({ x: 0, y: 0, add: false });
+    const graphics = scene.make.graphics({ x: 0, y: 0 });
     graphics.fillStyle(0xffffff, 1);
     graphics.fillCircle(8, 8, 8);
     graphics.generateTexture('smoke_particle', 16, 16);
+    graphics.destroy();
   }
 
   const emitter = scene.add.particles(config.x, config.y, 'smoke_particle', {

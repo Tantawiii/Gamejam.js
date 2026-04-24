@@ -4,6 +4,9 @@ import { BasicEnemy } from '../enemy/BasicEnemy';
 import { BombEnemy } from '../enemy/BombEnemy';
 import { ChunkyEnemy } from '../enemy/ChunkyEnemy';
 import type { Enemy } from '../enemy/Enemy';
+import { circleIntersectsCenteredRect } from '../enemy/circleRectIntersect';
+import { LongRangeEnemy } from '../enemy/LongRangeEnemy';
+import type { EnemyProjectileSpawn } from '../enemy/LongRangeEnemy';
 import { getWaveConfig, type EnemyType } from './WaveConfiguration';
 
 /**
@@ -44,9 +47,16 @@ export class WaveSystem {
   private static readonly BASIC_ENEMY_SPEED = 62;
   private static readonly BOMB_ENEMY_SPEED = 62;
   private static readonly CHUNKY_ENEMY_SPEED = 62 * 0.5;
+  private static readonly LONG_RANGE_ENEMY_SPEED = 48;
+  private static readonly ENEMY_PROJECTILE_TTL_MS = 9000;
+  /** Chunky enemies only spawn once the player reaches this level (1-based). */
+  private static readonly CHUNKY_MIN_PLAYER_LEVEL = 3;
+  /** Long-range enemies only spawn once the player reaches this level (1-based). */
+  private static readonly LONG_RANGE_MIN_PLAYER_LEVEL = 5;
   private readonly scene: Phaser.Scene;
   private readonly train: TrainController;
   private readonly getPlayerWorld: () => { x: number; y: number };
+  private readonly getPlayerLevel: () => number;
   private readonly callbacks: WaveSystemCallback;
   private readonly difficultyMultiplier: number;
   
@@ -61,7 +71,19 @@ export class WaveSystem {
     basic: [],
     bomb: [],
     chunky: [],
+    long_range: [],
   };
+
+  private readonly enemyProjectiles: Array<{
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    radius: number;
+    damage: number;
+    ttlMs: number;
+    gfx: Phaser.GameObjects.Arc;
+  }> = [];
   
   private spawnCycle = 0;
   
@@ -80,10 +102,12 @@ export class WaveSystem {
     difficultyMultiplier: number = 1.2,
     _spawnRadiusMin: number = 320,
     _spawnRadiusMax: number = 620,
+    getPlayerLevel: () => number = () => 999,
   ) {
     this.scene = scene;
     this.train = train;
     this.getPlayerWorld = getPlayerWorld;
+    this.getPlayerLevel = getPlayerLevel;
     this.callbacks = callbacks;
     this.difficultyMultiplier = difficultyMultiplier;
 
@@ -153,8 +177,44 @@ export class WaveSystem {
   }
 
   /**
+   * Basic enemies accelerate as endless waves progress (spawnCycle ticks up each batch).
+   */
+  private getBasicEnemySpeedScale(): number {
+    return 1 + Math.min(2.8, this.spawnCycle * 0.11);
+  }
+
+  /**
    * Get max health for enemy type
    */
+  /**
+   * Basic enemies are disabled; remap to bomb so nothing spawns as BasicEnemy.
+   */
+  private resolveSpawnTypeAndHealth(
+    type: EnemyType,
+    health: number,
+  ): { type: EnemyType; health: number } {
+    if (type === 'basic') {
+      return {
+        type: 'bomb',
+        health: this.getMaxHealthForType('bomb'),
+      };
+    }
+    const level = this.getPlayerLevel();
+    if (type === 'chunky' && level < WaveSystem.CHUNKY_MIN_PLAYER_LEVEL) {
+      return {
+        type: 'bomb',
+        health: this.getMaxHealthForType('bomb'),
+      };
+    }
+    if (type === 'long_range' && level < WaveSystem.LONG_RANGE_MIN_PLAYER_LEVEL) {
+      return {
+        type: 'bomb',
+        health: this.getMaxHealthForType('bomb'),
+      };
+    }
+    return { type, health };
+  }
+
   private getMaxHealthForType(type: EnemyType): number {
     switch (type) {
       case 'basic':
@@ -163,7 +223,26 @@ export class WaveSystem {
         return 30;
       case 'chunky':
         return 300;
+      case 'long_range':
+        return 45;
     }
+  }
+
+  private enqueueEnemyProjectile(spawn: EnemyProjectileSpawn): void {
+    const r = 5;
+    const gfx = this.scene.add.circle(spawn.x, spawn.y, r, 0xff5533, 1);
+    gfx.setStrokeStyle(1, 0xffccaa);
+    gfx.setDepth(7);
+    this.enemyProjectiles.push({
+      x: spawn.x,
+      y: spawn.y,
+      vx: spawn.vx,
+      vy: spawn.vy,
+      radius: r,
+      damage: spawn.damage,
+      ttlMs: WaveSystem.ENEMY_PROJECTILE_TTL_MS,
+      gfx,
+    });
   }
 
   /**
@@ -197,6 +276,7 @@ export class WaveSystem {
           health,
           10, // trainContactDamage
           500, // trainContactCooldownMs
+          () => this.getBasicEnemySpeedScale(),
         );
         break;
       }
@@ -235,6 +315,23 @@ export class WaveSystem {
           health,
           20, // trainContactDamage
           500, // trainContactCooldownMs
+        );
+        break;
+      }
+      case 'long_range': {
+        enemy = new LongRangeEnemy(
+          this.scene,
+          this.train,
+          this.getPlayerWorld,
+          x,
+          y,
+          commonRadius * 0.95,
+          WaveSystem.LONG_RANGE_ENEMY_SPEED,
+          0xffffff,
+          0xffffff,
+          8,
+          health,
+          (shot) => this.enqueueEnemyProjectile(shot),
         );
         break;
       }
@@ -334,7 +431,8 @@ export class WaveSystem {
     ) {
       this.spawnAcc -= this.getCurrentSpawnIntervalMs();
       const pending = this.pendingEnemies.shift()!;
-      this.spawnEnemy(pending.type, this.adjustHealthForNight(pending.health));
+      const { type, health } = this.resolveSpawnTypeAndHealth(pending.type, pending.health);
+      this.spawnEnemy(type, this.adjustHealthForNight(health));
     }
 
     // Check for despawned enemies
@@ -369,7 +467,8 @@ export class WaveSystem {
     ) {
       this.spawnAcc -= this.getCurrentSpawnIntervalMs();
       const respawning = this.respawnQueue.shift()!;
-      this.spawnEnemy(respawning.type, this.adjustHealthForNight(respawning.health));
+      const { type, health } = this.resolveSpawnTypeAndHealth(respawning.type, respawning.health);
+      this.spawnEnemy(type, this.adjustHealthForNight(health));
     }
 
     // Endless mode: always enqueue new enemies when pool is exhausted.
@@ -384,10 +483,54 @@ export class WaveSystem {
    * Determine enemy type by checking instance
    */
   private getEnemyType(enemy: Enemy): EnemyType {
+    if (enemy instanceof LongRangeEnemy) return 'long_range';
     if (enemy instanceof BasicEnemy) return 'basic';
     if (enemy instanceof BombEnemy) return 'bomb';
     if (enemy instanceof ChunkyEnemy) return 'chunky';
     return 'basic'; // Default fallback
+  }
+
+  updateEnemyProjectiles(
+    deltaMs: number,
+    hulls: Array<{ x: number; y: number; width: number; height: number }>,
+    onTrainDamaged?: () => void,
+  ): void {
+    let i = 0;
+    while (i < this.enemyProjectiles.length) {
+      const p = this.enemyProjectiles[i]!;
+      const dt = deltaMs / 1000;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.gfx.setPosition(p.x, p.y);
+      p.ttlMs -= deltaMs;
+
+      let hit = false;
+      for (const h of hulls) {
+        if (
+          circleIntersectsCenteredRect(
+            p.x,
+            p.y,
+            p.radius,
+            h.x,
+            h.y,
+            h.width,
+            h.height,
+          )
+        ) {
+          this.train.takeDamage(p.damage);
+          onTrainDamaged?.();
+          hit = true;
+          break;
+        }
+      }
+
+      if (hit || p.ttlMs <= 0) {
+        p.gfx.destroy();
+        this.enemyProjectiles.splice(i, 1);
+      } else {
+        i++;
+      }
+    }
   }
 
   /**
@@ -457,6 +600,7 @@ export class WaveSystem {
     for (const e of this.waveEnemies) {
       if (e.isAlive()) {
         e.update(deltaMs);
+        e.syncSpriteFacingForGameplayCamera();
       }
     }
   }
@@ -467,6 +611,11 @@ export class WaveSystem {
         e.addWorldOffset(dx, dy);
       }
     }
+    for (const p of this.enemyProjectiles) {
+      p.x += dx;
+      p.y += dy;
+      p.gfx.setPosition(p.x, p.y);
+    }
   }
 
   /**
@@ -476,7 +625,11 @@ export class WaveSystem {
     for (const e of this.waveEnemies) {
       e.destroy();
     }
-    for (const type of ['basic', 'bomb', 'chunky'] as const) {
+    for (const p of this.enemyProjectiles) {
+      p.gfx.destroy();
+    }
+    this.enemyProjectiles.length = 0;
+    for (const type of ['basic', 'bomb', 'chunky', 'long_range'] as const) {
       for (const e of this.enemyPools[type]) {
         e.destroy();
       }

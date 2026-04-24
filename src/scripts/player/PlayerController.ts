@@ -81,11 +81,11 @@ export class PlayerController {
    * Riding: offset from train center (world); keep player to the right of the hull and inside the camera view.
    */
   applyRideFromTrainOffset(
-    deltaMs: number,
+    _deltaMs: number,
     trainBody: Phaser.GameObjects.Rectangle,
     camera: Phaser.Cameras.Scene2D.Camera,
     offset: Phaser.Math.Vector2,
-    outsideTrainGap: number,
+    _outsideTrainGap: number,
     viewPad: number,
   ): void {
     const wx = trainBody.x + offset.x;

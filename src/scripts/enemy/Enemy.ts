@@ -1,6 +1,7 @@
 import * as Phaser from 'phaser';
 import { pushCircleOutOfCenteredRect } from '../player/circleRectPushOut';
 import type { TrainController } from '../train/TrainController';
+import { playStandardEnemyImpactFx } from '../vfx/CollisionImpactVfx';
 import { circleIntersectsCenteredRect } from './circleRectIntersect';
 import { Damageable } from './Damageable';
 
@@ -14,14 +15,14 @@ import { Damageable } from './Damageable';
  * 
  * KEY RESPONSIBILITIES:
  * 1. Health System - Track enemy health with takeDamage() and manage destruction when health reaches 0
- * 2. Visual Rendering - Create and manage circular sprite with health bar display
+ * 2. Visual Rendering - Sprite sheet walk animation (or circle fallback) plus health bar
  * 3. Train Collision Detection - Handle collision with train hulls and trigger damage/pushback
  * 4. Player Collision Detection - Detect when enemy touches the player (for future player damage)
  * 5. Damage To Bullets - Determine when bullets hit this enemy
  * 6. Abstract Methods - Define interface that subclasses must implement (update, getRadius, etc.)
  * 
  * IMPORTANT PROPERTIES:
- * - sprite: The visual circle representation of the enemy (created in Phaser)
+ * - sprite: The visual (animated sprite or circle fallback) for the enemy
  * - healthBar: Graphics object showing health as a bar above the enemy
  * - currentHealth / maxHealth: Track damage taken and total health pool
  * - trainHitCooldownMs: Prevents the same collision from dealing damage repeatedly per frame
@@ -44,7 +45,7 @@ export abstract class Enemy implements Damageable {
   protected readonly scene: Phaser.Scene;
   protected readonly train: TrainController;
   protected readonly getPlayerWorld: () => { x: number; y: number };
-  protected sprite: Phaser.GameObjects.Image | Phaser.GameObjects.Arc;
+  protected sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Arc;
   protected readonly collisionRadius: number;
   protected speed: number;
   protected trainHitCooldownMs: number = 0;
@@ -65,6 +66,8 @@ export abstract class Enemy implements Damageable {
     strokeColor: number,
     depth: number,
     maxHealth: number,
+    textureKey?: string,
+    tintWithFillColor: boolean = true,
   ) {
     this.scene = scene;
     this.train = train;
@@ -74,11 +77,23 @@ export abstract class Enemy implements Damageable {
     this.maxHealth = maxHealth;
     this.currentHealth = maxHealth;
 
-    if (scene.textures.exists('NORMAL_ENEMY')) {
-      const enemyImage = scene.add.image(x, y, 'NORMAL_ENEMY');
-      enemyImage.setDisplaySize(radius * 10, radius * 10);
-      enemyImage.setTint(fillColor);
-      this.sprite = enemyImage;
+    const resolvedKey =
+      textureKey && scene.textures.exists(textureKey)
+        ? textureKey
+        : !textureKey && scene.textures.exists('NORMAL_ENEMY')
+          ? 'NORMAL_ENEMY'
+          : undefined;
+
+    if (resolvedKey) {
+      this.ensureEnemyWalkAnimation(resolvedKey);
+      const animKey = Enemy.walkAnimKey(resolvedKey);
+      const enemySprite = scene.add.sprite(x, y, resolvedKey);
+      enemySprite.setDisplaySize(radius * 10, radius * 10);
+      if (tintWithFillColor) {
+        enemySprite.setTint(fillColor);
+      }
+      enemySprite.play(animKey);
+      this.sprite = enemySprite;
     } else {
       const enemyCircle = scene.add.circle(x, y, radius, fillColor, 1);
       enemyCircle.setStrokeStyle(2, strokeColor);
@@ -90,6 +105,25 @@ export abstract class Enemy implements Damageable {
     this.healthBar = scene.add.graphics();
     this.healthBar.setDepth(depth + 1); // Above the enemy
     this.updateHealthBarPosition();
+  }
+
+  private static walkAnimKey(textureKey: string): string {
+    return `${textureKey}_walk`;
+  }
+
+  private ensureEnemyWalkAnimation(textureKey: string): void {
+    const animKey = Enemy.walkAnimKey(textureKey);
+    if (this.scene.anims.exists(animKey)) {
+      return;
+    }
+    const texture = this.scene.textures.get(textureKey);
+    const end = Math.max(0, texture.frameTotal - 1);
+    this.scene.anims.create({
+      key: animKey,
+      frames: this.scene.anims.generateFrameNumbers(textureKey, { start: 0, end: end }),
+      frameRate: 8,
+      repeat: -1,
+    });
   }
 
   /**
@@ -125,6 +159,13 @@ export abstract class Enemy implements Damageable {
     this.sprite.setPosition(x, y);
     this.sprite.setAlpha(1);
     this.sprite.setVisible(true);
+    if (this.sprite instanceof Phaser.GameObjects.Sprite) {
+      const tk = this.sprite.texture.key;
+      const animKey = Enemy.walkAnimKey(tk);
+      if (this.scene.anims.exists(animKey)) {
+        this.sprite.play(animKey);
+      }
+    }
     this.healthBar.setAlpha(1);
     this.healthBar.setVisible(true);
     this.updateHealthBarPosition();
@@ -133,6 +174,9 @@ export abstract class Enemy implements Damageable {
   deactivateForPool(): void {
     this.activeInWorld = false;
     this.currentHealth = 0;
+    if (this.sprite instanceof Phaser.GameObjects.Sprite) {
+      this.sprite.anims.stop();
+    }
     this.sprite.setVisible(false);
     this.healthBar.clear();
     this.healthBar.setVisible(false);
@@ -144,6 +188,7 @@ export abstract class Enemy implements Damageable {
   ): void {
     const x = this.sprite.x;
     const y = this.sprite.y;
+    playStandardEnemyImpactFx(this.scene, x, y, { depth: this.sprite.depth + 10 });
     this.healthBar.clear();
     this.scene.tweens.add({
       targets: [this.sprite, this.healthBar],
@@ -217,6 +262,19 @@ export abstract class Enemy implements Damageable {
   addWorldOffset(dx: number, dy: number): void {
     this.sprite.setPosition(this.sprite.x + dx, this.sprite.y + dy);
     this.updateHealthBarPosition();
+  }
+
+  /**
+   * Sprite art faces right by default. On the right half of the viewport, flip so enemies
+   * face inward toward the train; left half stays unflipped.
+   */
+  syncSpriteFacingForGameplayCamera(): void {
+    if (!(this.sprite instanceof Phaser.GameObjects.Sprite)) {
+      return;
+    }
+    const cam = this.scene.cameras.main.worldView;
+    const midX = cam.x + cam.width * 0.5;
+    this.sprite.setFlipX(this.sprite.x >= midX);
   }
 
   /**

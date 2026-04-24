@@ -52,6 +52,8 @@ import { Enemy } from './Enemy';
  */
 export class BasicEnemy extends Enemy {
   private readonly radius: number;
+  private readonly baseSpeed: number;
+  private readonly getSpeedScale: () => number;
   private readonly trainContactDamage: number;
   private readonly trainContactCooldownMs: number;
   private attackCooldownMs: number = 0;
@@ -70,14 +72,32 @@ export class BasicEnemy extends Enemy {
     maxHealth: number,
     trainContactDamage: number,
     trainContactCooldownMs: number,
+    getSpeedScale: () => number = () => 1,
   ) {
-    super(scene, train, getPlayerWorld, x, y, radius, speed, fillColor, strokeColor, depth, maxHealth);
+    super(
+      scene,
+      train,
+      getPlayerWorld,
+      x,
+      y,
+      radius,
+      speed,
+      fillColor,
+      strokeColor,
+      depth,
+      maxHealth,
+      'NORMAL_ENEMY',
+      false,
+    );
     this.radius = radius;
+    this.baseSpeed = speed;
+    this.getSpeedScale = getSpeedScale;
     this.trainContactDamage = trainContactDamage;
     this.trainContactCooldownMs = trainContactCooldownMs;
   }
 
   update(deltaMs: number): void {
+    this.speed = this.baseSpeed * this.getSpeedScale();
     const dt = deltaMs / 1000;
     const tx = this.train.body.x;
     const ty = this.train.body.y;

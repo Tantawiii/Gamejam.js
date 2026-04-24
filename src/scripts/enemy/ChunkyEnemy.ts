@@ -94,7 +94,21 @@ export class ChunkyEnemy extends Enemy {
     trainContactDamage: number,
     trainContactCooldownMs: number,
   ) {
-    super(scene, train, getPlayerWorld, x, y, radius, speed, fillColor, strokeColor, depth, maxHealth);
+    super(
+      scene,
+      train,
+      getPlayerWorld,
+      x,
+      y,
+      radius,
+      speed,
+      fillColor,
+      strokeColor,
+      depth,
+      maxHealth,
+      'FAST_ENEMY',
+      true,
+    );
     this.radius = radius;
     this.trainContactDamage = trainContactDamage;
     this.trainContactCooldownMs = trainContactCooldownMs;

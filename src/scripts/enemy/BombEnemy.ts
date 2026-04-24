@@ -2,6 +2,7 @@ import * as Phaser from 'phaser';
 import { Enemy } from './Enemy';
 import type { TrainController } from '../train/TrainController';
 import { circleIntersectsCenteredRect } from './circleRectIntersect';
+import { playBombTrainExplosionFx } from '../vfx/CollisionImpactVfx';
 
 /**
  * BOMBENEMY.TS - Explosive Enemy That Self-Destructs
@@ -106,6 +107,8 @@ export class BombEnemy extends Enemy {
       strokeColor,
       depth,
       maxHealth,
+      'NORMAL_ENEMY',
+      true,
     );
     this.radius = radius;
     this.explosionDamage = explosionDamage;
@@ -147,7 +150,10 @@ export class BombEnemy extends Enemy {
         )
       ) {
         // Explode! Deal massive damage and destroy self
+        const ex = this.sprite.x;
+        const ey = this.sprite.y;
         this.train.takeDamage(this.explosionDamage);
+        playBombTrainExplosionFx(this.scene, ex, ey, { depth: this.sprite.depth + 12 });
         this.currentHealth = 0; // Mark as dead
         this.destroy();
         return;

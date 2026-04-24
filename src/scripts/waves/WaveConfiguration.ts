@@ -13,13 +13,13 @@
  * - Spawn interval controls tempo of enemy release
  * 
  * PROGRESSION PHILOSOPHY:
- * - Wave 1-4: Basic and Bomb enemies (introduce mechanics)
- * - Wave 5+: Introduce Chunky enemies (tank mechanics)
+ * - Basic spawns remap to bombs in WaveSystem
+ * - Chunky enemies only appear once player level ≥ 3; long-range once level ≥ 5
  * - Each wave harder than last via multiplier
  * - Mix gradually changes based on design decisions
  */
 
-export type EnemyType = 'basic' | 'bomb' | 'chunky';
+export type EnemyType = 'basic' | 'bomb' | 'chunky' | 'long_range';
 
 export interface EnemySpec {
   type: EnemyType;
@@ -61,28 +61,32 @@ export function getWaveConfig(
 ): WaveConfig {
   // Base wave configs before multiplier
   const baseConfigs: Record<number, EnemySpec[]> = {
-    1: [{ type: 'basic', count: 30 }],
-    2: [
-      { type: 'basic', count: 20 },
+    1: [
       { type: 'bomb', count: 20 },
+      { type: 'long_range', count: 10 },
+    ],
+    2: [
+      { type: 'bomb', count: 25 },
+      { type: 'long_range', count: 15 },
     ],
     3: [
-      { type: 'basic', count: 15 },
-      { type: 'bomb', count: 25 },
+      { type: 'bomb', count: 28 },
+      { type: 'long_range', count: 12 },
     ],
     4: [
-      { type: 'basic', count: 10 },
-      { type: 'bomb', count: 30 },
+      { type: 'bomb', count: 22 },
+      { type: 'long_range', count: 12 },
+      { type: 'chunky', count: 8 },
     ],
     5: [
-      { type: 'basic', count: 15 },
-      { type: 'bomb', count: 15 },
-      { type: 'chunky', count: 5 },
+      { type: 'bomb', count: 18 },
+      { type: 'chunky', count: 10 },
+      { type: 'long_range', count: 15 },
     ],
     6: [
-      { type: 'basic', count: 10 },
-      { type: 'bomb', count: 20 },
-      { type: 'chunky', count: 10 },
+      { type: 'bomb', count: 22 },
+      { type: 'chunky', count: 12 },
+      { type: 'long_range', count: 18 },
     ],
   };
 

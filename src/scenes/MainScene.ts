@@ -3,6 +3,7 @@ import { CardPityState } from '../scripts/card/CardPityState';
 import { CardDraftSystem, type CardOffer } from '../scripts/card/CardDraftSystem';
 import { configureGameplayCamera } from '../scripts/camera/configureGameplayCamera';
 import { WaveSystem } from '../scripts/waves/WaveSystem';
+import type { EnemyType } from '../scripts/waves/WaveConfiguration';
 import { DownwardParallaxBackground } from '../scripts/parallax/DownwardParallaxBackground';
 import {
   MAIN_CAMERA_SHAKE_ON_TRAIN_HIT,
@@ -196,6 +197,9 @@ export class MainScene extends Phaser.Scene {
         },
       },
       1.2, // difficultyMultiplier
+      320,
+      620,
+      () => this.playerLevel,
     );
 
     this.turrets = new TrainTurretSystem(this, {
@@ -237,7 +241,7 @@ export class MainScene extends Phaser.Scene {
     });
   }
 
-  private rollExpDrop(type: 'basic' | 'bomb' | 'chunky'): number {
+  private rollExpDrop(type: EnemyType): number {
     switch (type) {
       case 'basic':
         return Phaser.Math.Between(20, 25);
@@ -245,6 +249,8 @@ export class MainScene extends Phaser.Scene {
         return Phaser.Math.Between(30, 35);
       case 'chunky':
         return Phaser.Math.Between(50, 55);
+      case 'long_range':
+        return Phaser.Math.Between(28, 33);
     }
   }
 
@@ -833,13 +839,15 @@ export class MainScene extends Phaser.Scene {
         waves.addEnemyWorldOffset(0, trainScrollDy);
       }
       const hulls = train.getHullRects();
-      waves.updateCollisions(hulls, () => {
+      const onTrainDamagedByEnemy = () => {
         if (this.time.now >= this.nextTrainHitShakeAt) {
           const s = MAIN_CAMERA_SHAKE_ON_TRAIN_HIT;
           this.cameras.main.shake(s.durationMs, s.intensity, true);
           this.nextTrainHitShakeAt = this.time.now + 120;
         }
-      });
+      };
+      waves.updateEnemyProjectiles(delta, hulls, onTrainDamagedByEnemy);
+      waves.updateCollisions(hulls, onTrainDamagedByEnemy);
       const shots = this.turrets?.update(delta, train, waves, coalOk) ?? 0;
       if (shots > 0 && coalOk) {
         train.spendCoal(shots * 0.24);

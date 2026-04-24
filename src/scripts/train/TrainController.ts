@@ -294,7 +294,6 @@ export class TrainController {
     // Only allow acceleration if we have coal
     const effectiveThrottle = this.coal > 0 ? this.throttle : Math.min(0, this.throttle);
 
-    const oldSpeed = this.speed;
     // We update speed if cruising OR if we already have some speed (to allow coasting/decelerating)
     if (this.cruising || this.speed > 0) {
       if (effectiveThrottle > 0.05) {
