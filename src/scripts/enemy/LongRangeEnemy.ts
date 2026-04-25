@@ -16,6 +16,7 @@ export type EnemyProjectileSpawn = {
 export class LongRangeEnemy extends Enemy {
   private readonly radius: number;
   private readonly projectileSpeed: number;
+  private readonly baseMoveSpeed: number;
   private readonly preferredDistMin: number;
   private readonly preferredDistMax: number;
   private readonly shotCooldownMs: number;
@@ -80,9 +81,10 @@ export class LongRangeEnemy extends Enemy {
       false,
     );
     this.radius = radius;
+    this.baseMoveSpeed = speed;
     this.projectileSpeed = 240;
-    this.preferredDistMin = 260;
-    this.preferredDistMax = 400;
+    this.preferredDistMin = 170;
+    this.preferredDistMax = 280;
     this.shotCooldownMs = 1700;
     this.shotDamage = 12;
     this.queueProjectile = queueProjectile;
@@ -124,10 +126,8 @@ export class LongRangeEnemy extends Enemy {
 
       const mLen = Math.hypot(mx, my);
       if (mLen > 1e-6) {
-        this.sprite.setPosition(
-          ex + (mx / mLen) * this.speed * dt,
-          ey + (my / mLen) * this.speed * dt,
-        );
+        const moveSpeed = this.baseMoveSpeed * this.getExternalSpeedMultiplier();
+        this.sprite.setPosition(ex + (mx / mLen) * moveSpeed * dt, ey + (my / mLen) * moveSpeed * dt);
         this.updateHealthBarPosition();
       }
     }
@@ -167,10 +167,10 @@ export class LongRangeEnemy extends Enemy {
   }
 
   getTrainContactDamage(): number {
-    return 0;
+    return 12;
   }
 
   getTrainContactCooldownMs(): number {
-    return 999999;
+    return 500;
   }
 }

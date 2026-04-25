@@ -86,25 +86,10 @@ export function registerAssets(scene: Phaser.Scene): void {
     scene.load.spritesheet(key, encodePublicAssetUrl(path), ENEMY_SPRITESHEET_CONFIG);
   }
 
-  // Snowy ground / tile layers
-  for (let i = 1; i <= 7; i++) {
-    const n = String(i).padStart(2, '0');
-    scene.load.image(
-      `bg_snow_${n}`,
-      encodePublicAssetUrl(
-        `assets/Background Assets/Top-Down Snowy Tileset_Environment - Snow ${n}.png`,
-      ),
-    );
-  }
-  scene.load.image(
-    'bg_tile_untitled',
-    encodePublicAssetUrl('assets/Background Assets/Untitled-1.png'),
-  );
-  scene.load.image(
-    'bg_photo_untitled',
-    encodePublicAssetUrl('assets/Background/Untitled-1.jpg'),
-  );
-
+  // Background and rare gate overlays
+  scene.load.image('bg_tile_base', encodePublicAssetUrl('assets/Background/Untitled-1.png'));
+  scene.load.image('bg_gate_1', encodePublicAssetUrl('assets/Background Assets/Untitled-2.png'));
+  scene.load.image('bg_gate_2', encodePublicAssetUrl('assets/Background Assets/Untitled-3.png'));
   // Decorative props
   for (let rock = 1; rock <= 8; rock++) {
     for (let v = 1; v <= 5; v++) {
@@ -129,6 +114,20 @@ export function registerAssets(scene: Phaser.Scene): void {
     'gosling_with_shadow',
     encodePublicAssetUrl('assets/Golden Goose/Gosling_with_shadow.png'),
   );
+  scene.load.image('train_engine_cart', encodePublicAssetUrl('assets/Train/Engine_Cart.png'));
+  scene.load.image('train_back_cart', encodePublicAssetUrl('assets/Train/Back_Cart.png'));
+  scene.load.image('train_base_legacy', encodePublicAssetUrl('assets/Train/train.png'));
+  scene.load.image('rail_vertical', encodePublicAssetUrl('assets/Rail/rail.png'));
+  scene.load.image('pickup_coal', encodePublicAssetUrl('assets/Coal/coal.png'));
+  scene.load.image('weapon_basic', encodePublicAssetUrl('assets/Weapons/W4.png'));
+  scene.load.image('weapon_sniper', encodePublicAssetUrl('assets/Weapons/W5.png'));
+  scene.load.image('weapon_dome', encodePublicAssetUrl('assets/Weapons/W3.png'));
+  scene.load.image('weapon_shuriken', encodePublicAssetUrl('assets/Weapons/W1.png'));
+  scene.load.image('weapon_caterpillar', encodePublicAssetUrl('assets/Weapons/W2.png'));
+  scene.load.image('bullet_basic', encodePublicAssetUrl('assets/Bullets/W01.png'));
+  scene.load.image('bullet_shuriken', encodePublicAssetUrl('assets/Bullets/W02.png'));
+  scene.load.image('bullet_caterpillar', encodePublicAssetUrl('assets/Bullets/W03.png'));
+  scene.load.image('bullet_sniper', encodePublicAssetUrl('assets/Bullets/W05.png'));
 
   // Train / impact VFX frames (for future animations)
   for (let frame = 1; frame <= 7; frame++) {

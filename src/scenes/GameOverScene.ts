@@ -13,15 +13,18 @@ export class GameOverScene extends Phaser.Scene {
     this.cameras.main.fadeIn(280, 0, 0, 0);
 
     this.add
-      .text(width / 2, height * 0.38, 'GAME OVER', {
-        fontFamily: 'system-ui, Segoe UI, Roboto, sans-serif',
-        fontSize: '42px',
-        color: '#f85149',
+      .text(width / 2, height * 0.36, 'YOU DIED', {
+        fontFamily: 'Nosifer, system-ui, Segoe UI, Roboto, sans-serif',
+        fontSize: '76px',
+        color: '#d83b3b',
+        stroke: '#200',
+        strokeThickness: 6,
       })
-      .setOrigin(0.5);
+      .setOrigin(0.5)
+      .setShadow(0, 8, '#110000', 12, true, true);
 
     this.add
-      .text(width / 2, height * 0.52, 'An enemy reached you.', {
+      .text(width / 2, height * 0.55, 'The train has fallen.', {
         fontFamily: 'system-ui, Segoe UI, Roboto, sans-serif',
         fontSize: '18px',
         color: '#c9d1d9',

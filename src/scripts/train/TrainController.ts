@@ -24,6 +24,7 @@ export type TrainControllerOptions = {
 
 type FleetPart = {
   rect: Phaser.GameObjects.Rectangle;
+  sprite: Phaser.GameObjects.Image;
   isEngine: boolean;
 };
 
@@ -34,6 +35,7 @@ type FleetPart = {
 export class TrainController {
   private readonly scene: Phaser.Scene;
   private readonly parts: FleetPart[] = [];
+  private readonly visualScale = 0.7;
   private baseAcceleration: number;
   private baseBrakeDeceleration: number;
   private baseDragDeceleration: number;
@@ -75,21 +77,23 @@ export class TrainController {
 
     const depth = options.depth ?? 0;
     this.baseDepth = depth;
-    const fill = options.fillColor ?? 0x6b4f2a;
-    const stroke = options.strokeColor ?? 0x3d2817;
-    const strokeW = options.strokeWidth ?? 2;
-
+    const engineSprite = scene.add
+      .image(options.x, options.y, 'train_engine_cart')
+      .setDepth(depth + 0.1);
+    const eFrame = scene.textures.getFrame('train_engine_cart');
+    const engineW = (eFrame?.width ?? options.engineWidth) * this.visualScale;
+    const engineH = (eFrame?.height ?? options.engineHeight) * this.visualScale;
     const engine = scene.add.rectangle(
       options.x,
       options.y,
-      options.engineWidth,
-      options.engineHeight,
-      fill,
+      engineW,
+      engineH,
+      0xffffff,
       1,
     );
-    engine.setStrokeStyle(strokeW, stroke);
+    engine.setVisible(false);
     engine.setDepth(depth);
-    this.parts.push({ rect: engine, isEngine: true });
+    this.parts.push({ rect: engine, sprite: engineSprite, isEngine: true });
     this.body = engine;
   }
 
@@ -100,20 +104,24 @@ export class TrainController {
     }
     const last = this.parts[this.parts.length - 1]!.rect;
     const gap = this.fleetCfg.carriageGap;
-    const h = this.fleetCfg.carriageHeight;
-    const w = this.fleetCfg.carriageWidth;
+    const cFrame = this.scene.textures.getFrame('train_back_cart');
+    const h = (cFrame?.height ?? this.fleetCfg.carriageHeight) * this.visualScale;
+    const w = (cFrame?.width ?? this.fleetCfg.carriageWidth) * this.visualScale;
     const newY = last.y + last.height * 0.5 + gap + h * 0.5;
     const r = this.scene.add.rectangle(
       last.x,
       newY,
       w,
       h,
-      this.fleetCfg.carriageFillColor,
+      0xffffff,
       1,
     );
-    r.setStrokeStyle(2, this.fleetCfg.carriageStrokeColor);
+    r.setVisible(false);
     r.setDepth(this.baseDepth);
-    this.parts.push({ rect: r, isEngine: false });
+    const sprite = this.scene.add
+      .image(last.x, newY, 'train_back_cart')
+      .setDepth(this.baseDepth + 0.1);
+    this.parts.push({ rect: r, sprite, isEngine: false });
     return true;
   }
 
@@ -209,18 +217,18 @@ export class TrainController {
   }
 
   /**
-   * Turret mounts: engine gets 2 on roof line; each carriage gets 4. Higher render depth than hulls.
+   * Turret mounts: engine gets 2 side mounts near the body centerline.
    */
   getTurretWorldPositions(): Phaser.Math.Vector2[] {
     const roofInset = this.fleetCfg.turretRoofInsetY;
     const out: Phaser.Math.Vector2[] = [];
 
     const eng = this.parts[0]!.rect;
-    const engRoofY = eng.y - eng.height * 0.5 - roofInset;
-    const engHalfW = eng.width * 0.32;
+    const engSideY = eng.y + eng.height * 0.02;
+    const engHalfW = eng.width * 0.33;
     out.push(
-      new Phaser.Math.Vector2(eng.x - engHalfW, engRoofY),
-      new Phaser.Math.Vector2(eng.x + engHalfW, engRoofY),
+      new Phaser.Math.Vector2(eng.x - engHalfW, engSideY),
+      new Phaser.Math.Vector2(eng.x + engHalfW, engSideY),
     );
 
     for (let i = 1; i < this.parts.length; i++) {
@@ -313,12 +321,15 @@ export class TrainController {
       this.coal = Math.max(0, this.coal - drain);
     }
 
-    // Keep train fixed in world space so it remains screen-centered; movement feel
-    // comes from speed-scaled background motion and enemy flow.
+    // Keep visuals synced to hull rectangles.
+    for (const part of this.parts) {
+      part.sprite.setPosition(part.rect.x, part.rect.y);
+    }
   }
 
   destroy(): void {
     for (const p of this.parts) {
+      p.sprite.destroy();
       p.rect.destroy();
     }
     this.parts.length = 0;

@@ -1,12 +1,14 @@
 import * as Phaser from 'phaser';
 
 export type ParallaxLayerConfig = {
-  /** Pixels per second. Positive = stripes scroll downward on screen (sense of moving up / forward). */
+  /** Pixels per second. Positive = layers scroll downward on screen. */
   speed: number;
-  colorA: number;
-  colorB: number;
+  /** Optional texture key; if provided, this image tiles instead of generated stripes. */
+  textureKey?: string;
+  colorA?: number;
+  colorB?: number;
   /** Vertical size of one full A→B cycle in the generated texture. */
-  bandHeight: number;
+  bandHeight?: number;
   /** 0–1; defaults to 1. */
   alpha?: number;
 };
@@ -54,8 +56,16 @@ export class DownwardParallaxBackground {
     const baseDepth = options.depth ?? -1000;
 
     options.layers.forEach((layer, layerIndex) => {
-      const key = makeStripeTextureKey();
-      registerStripeTexture(scene, key, layer.colorA, layer.colorB, layer.bandHeight);
+      const key = layer.textureKey ?? makeStripeTextureKey();
+      if (!layer.textureKey) {
+        registerStripeTexture(
+          scene,
+          key,
+          layer.colorA ?? 0x12151c,
+          layer.colorB ?? 0x1a1f28,
+          layer.bandHeight ?? 56,
+        );
+      }
 
       const tile = scene.add.tileSprite(0, 0, width, height, key);
       tile.setOrigin(0, 0);
@@ -69,11 +79,17 @@ export class DownwardParallaxBackground {
     });
   }
 
-  update(deltaMs: number, speedScale = 1): void {
+  update(deltaMs: number, speedScale = 1): number {
     const dt = deltaMs / 1000;
+    let primaryDy = 0;
     for (const { tile, speed } of this.layers) {
-      tile.tilePositionY -= speed * Math.max(0, speedScale) * dt;
+      const dy = speed * Math.max(0, speedScale) * dt;
+      tile.tilePositionY -= dy;
+      if (primaryDy === 0) {
+        primaryDy = dy;
+      }
     }
+    return primaryDy;
   }
 
   destroy(): void {

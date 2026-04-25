@@ -19,7 +19,6 @@ import {
   MAIN_WORLD,
 } from '../scripts/game/gameConfig';
 import { CoalPickupManager } from '../scripts/pickups/CoalPickupManager';
-import { ExperiencePickupManager } from '../scripts/pickups/ExperiencePickupManager';
 import { PlayerController } from '../scripts/player/PlayerController';
 import { TrainController } from '../scripts/train/TrainController';
 import { TrainRidingController } from '../scripts/train/TrainRidingController';
@@ -39,7 +38,6 @@ export class MainScene extends Phaser.Scene {
   private turrets?: TrainTurretSystem;
   private waves?: WaveSystem;
   private coalPickups?: CoalPickupManager;
-  private expPickups?: ExperiencePickupManager;
   private hud?: GameplayHud;
   private engineSmoke?: Phaser.GameObjects.Particles.ParticleEmitter;
   private draft?: CardDraftSystem;
@@ -61,6 +59,11 @@ export class MainScene extends Phaser.Scene {
   private wasPointerDown = false;
   private nextTrainHitShakeAt = 0;
   private nightTint?: Phaser.GameObjects.Rectangle;
+  private railSegments: Phaser.GameObjects.Image[] = [];
+  private gateTopSprites: Phaser.GameObjects.Image[] = [];
+  private gateBottomSprites: Phaser.GameObjects.Image[] = [];
+  private gateBlockers: Phaser.GameObjects.Rectangle[] = [];
+  private gateSpawnAccMs = 0;
   private dayNightCycleMs = 0;
   private hasShownFirstNightWarning = false;
   private readonly dayNightCycleDurationMs = 220000;
@@ -112,6 +115,24 @@ export class MainScene extends Phaser.Scene {
       .setOrigin(0, 0)
       .setScrollFactor(0)
       .setDepth(6800);
+    if (this.textures.exists('rail_vertical')) {
+      const frame = this.textures.getFrame('rail_vertical');
+      const srcW = frame?.width ?? 96;
+      const srcH = frame?.height ?? 256;
+      const engineFrame = this.textures.getFrame('train_engine_cart');
+      const targetRailW = Math.max(60, Math.floor((engineFrame?.width ?? srcW) * 0.76));
+      const railScale = targetRailW / srcW;
+      const stepY = Math.max(1, srcH * railScale);
+      for (let y = -stepY; y <= this.scale.height + stepY; y += stepY) {
+        const rail = this.add
+          .image(this.scale.width * 0.5, y, 'rail_vertical')
+          .setScrollFactor(0)
+          .setDepth(-900);
+        rail.setOrigin(0.5, 0);
+        rail.setScale(railScale);
+        this.railSegments.push(rail);
+      }
+    }
 
     const startX = MAIN_WORLD.width * MAIN_TRAIN_SPAWN.xFrac;
     const startY = MAIN_WORLD.height * MAIN_TRAIN_SPAWN.yFrac;
@@ -170,7 +191,6 @@ export class MainScene extends Phaser.Scene {
     this.keyBrake = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.S);
 
     this.coalPickups = new CoalPickupManager(this, MAIN_COAL_PICKUP);
-    this.expPickups = new ExperiencePickupManager(this);
 
     this.waves = new WaveSystem(
       this,
@@ -190,7 +210,9 @@ export class MainScene extends Phaser.Scene {
         },
         onEnemyDestroyed: (x, y, type) => {
           this.coalPickups?.spawn(x, y, 6);
-          this.expPickups?.spawn(x, y, this.rollExpDrop(type));
+          const gained = this.rollExpDrop(type);
+          this.gainExperience(gained);
+          this.showExpGainText(x, y, gained);
         },
         onEnemyDespawned: () => {
           // Enemy went off-screen and is being respawned
@@ -236,9 +258,28 @@ export class MainScene extends Phaser.Scene {
       this.placementPrompt = undefined;
       this.introAutoTimer?.destroy();
       this.introTypeTimer?.destroy();
-      this.expPickups?.destroy();
       this.nightTint?.destroy();
+      this.gateTopSprites.forEach((g) => g.destroy());
+      this.gateBottomSprites.forEach((g) => g.destroy());
+      this.gateBlockers.forEach((g) => g.destroy());
     });
+  }
+
+  private spawnRareGate(): void {
+    if (!this.textures.exists('bg_gate_1') || !this.textures.exists('bg_gate_2')) return;
+    const margin = 84;
+    const x = Phaser.Math.Between(margin, this.scale.width - margin);
+    const y = -120;
+    const top = this.add.image(x, y, 'bg_gate_1').setScrollFactor(0).setDepth(-850);
+    const bottomY = y + top.displayHeight * 0.54;
+    const bottom = this.add.image(x, bottomY, 'bg_gate_2').setScrollFactor(0).setDepth(-851);
+    const totalH = (bottom.y + bottom.displayHeight * 0.5) - (top.y - top.displayHeight * 0.5);
+    const blockCenterY = (top.y + bottom.y) * 0.5;
+    const block = this.add.rectangle(x, blockCenterY, top.width * 0.84, totalH * 0.72, 0xffffff, 0);
+    block.setScrollFactor(0).setDepth(-849);
+    this.gateTopSprites.push(top);
+    this.gateBottomSprites.push(bottom);
+    this.gateBlockers.push(block);
   }
 
   private rollExpDrop(type: EnemyType): number {
@@ -257,10 +298,10 @@ export class MainScene extends Phaser.Scene {
   private gainExperience(amount: number): void {
     if (amount <= 0) return;
     this.currentExp += amount;
-    if (this.currentExp >= this.expectedExp) {
+    while (this.currentExp >= this.expectedExp) {
+      this.currentExp -= this.expectedExp;
       this.playerLevel += 1;
-      this.expectedExp = Math.ceil(this.expectedExp * 2);
-      this.currentExp = 0;
+      this.expectedExp = Math.ceil(this.expectedExp * 1.02);
       this.startCardDraft();
     }
   }
@@ -318,6 +359,7 @@ export class MainScene extends Phaser.Scene {
 
   private showNightWarningBubble(): void {
     const text = "Uh... night's here. Enemies get angry after dark. Great. Super great.";
+    this.waves?.setSpawningPaused(true);
     const bubble = this.createSpeechBubble(54, this.scale.height - 220, 700, 150, 'Dad');
     bubble.content.setText(text);
     const c = bubble.container.setScrollFactor(0).setDepth(7050).setAlpha(0);
@@ -332,7 +374,10 @@ export class MainScene extends Phaser.Scene {
         targets: c,
         alpha: 0,
         duration: 450,
-        onComplete: () => c.destroy(),
+        onComplete: () => {
+          c.destroy();
+          this.waves?.setSpawningPaused(false);
+        },
       });
     });
   }
@@ -399,18 +444,18 @@ export class MainScene extends Phaser.Scene {
         kind: 'train',
       },
       {
-        id: 'weapon-cannon',
-        label: 'Cannon Mk+',
-        description: 'Upgrade Cannon. If absent, place a new Cannon.',
+        id: 'weapon-basic',
+        label: 'Basic Turret Mk+',
+        description: 'Upgrade Basic. If absent, place a new Basic turret.',
         kind: 'weapon',
-        weaponType: 'cannon',
+        weaponType: 'basic',
       },
       {
-        id: 'weapon-bomb',
-        label: 'Bomb Thrower',
-        description: 'Upgrade Bomb Thrower. If absent, place a new one.',
+        id: 'weapon-caterpillar',
+        label: 'Caterpillar Mortar',
+        description: 'Upgrade Caterpillar. If absent, place a new one.',
         kind: 'weapon',
-        weaponType: 'bomb',
+        weaponType: 'caterpillar',
       },
       {
         id: 'weapon-sniper',
@@ -420,11 +465,18 @@ export class MainScene extends Phaser.Scene {
         weaponType: 'sniper',
       },
       {
-        id: 'weapon-scatter',
-        label: 'Scatter Pod',
-        description: 'Upgrade Scatter. If absent, place a new Scatter.',
+        id: 'weapon-shuriken',
+        label: 'Shuriken Pod',
+        description: 'Upgrade Shuriken. If absent, place a new Shuriken pod.',
         kind: 'weapon',
-        weaponType: 'scatter',
+        weaponType: 'shuriken',
+      },
+      {
+        id: 'weapon-slow-dome',
+        label: 'Slowing Dome',
+        description: 'Place/upgrade a dome that slows enemies near the train.',
+        kind: 'weapon',
+        weaponType: 'slow_dome',
       },
       {
         id: 'weapon-damage',
@@ -809,17 +861,17 @@ export class MainScene extends Phaser.Scene {
     this.train?.update(delta);
     const trainScrollSpeed = train?.getSpeed() ?? 0;
     const trainScrollDy = (trainScrollSpeed * delta) / 1000;
+    let bgScrollDy = 0;
     if (train && trainScrollSpeed > 0) {
       const speedRatio = trainScrollSpeed / Math.max(1, train.getMaxSpeed());
       const parallaxScale = 0.7 + speedRatio * 1.9;
-      this.parallax?.update(delta, parallaxScale);
+      bgScrollDy = this.parallax?.update(delta, parallaxScale) ?? 0;
       this.coalPickups?.addWorldOffset(0, trainScrollDy);
-      this.expPickups?.addWorldOffset(0, trainScrollDy);
     }
     const coalOk = train?.hasCoal() ?? false;
 
     if (!cardsActive) {
-      this.riding?.updatePlayerMotion(delta, cam);
+      this.riding?.updatePlayerMotion(delta, cam, this.gateBlockers);
     }
 
     const waves = this.waves;
@@ -835,6 +887,7 @@ export class MainScene extends Phaser.Scene {
     } else if (!cardsActive && train && waves) {
       waves.update(delta);
       waves.updateEnemies(delta);
+      waves.constrainEnemiesToBlockers(this.gateBlockers);
       if (trainScrollDy > 0) {
         waves.addEnemyWorldOffset(0, trainScrollDy);
       }
@@ -872,18 +925,6 @@ export class MainScene extends Phaser.Scene {
       if (fuelGained > 0) {
         this.showFuelGainText(player.sprite.x, player.sprite.y, fuelGained);
       }
-      const gained = this.expPickups?.update(
-        delta,
-        playerX,
-        playerY,
-        MAIN_PLAYER_VISUAL.radius,
-        this.coalPickups.getMagnetRange(),
-        train,
-      ) ?? 0;
-      if (gained > 0) {
-        this.gainExperience(gained);
-        this.showExpGainText(player.sprite.x, player.sprite.y, gained);
-      }
     }
 
     if (!this.introCutsceneActive && train && this.hud) {
@@ -892,6 +933,37 @@ export class MainScene extends Phaser.Scene {
         currentExp: this.currentExp,
         expectedExp: this.expectedExp,
       });
+    }
+    if (train?.isDestroyed) {
+      this.scene.start('GameOverScene');
+    }
+    // Rails are intentionally static (no parallax motion).
+
+    this.gateSpawnAccMs += delta;
+    if (this.gateSpawnAccMs >= 3000) {
+      this.gateSpawnAccMs = 0;
+      if (Math.random() < 0.2) {
+        this.spawnRareGate();
+      }
+    }
+    if (bgScrollDy > 0) {
+      for (let i = this.gateTopSprites.length - 1; i >= 0; i--) {
+        const s = this.gateTopSprites[i];
+        const sb = this.gateBottomSprites[i];
+        const b = this.gateBlockers[i];
+        if (!s || !sb || !b) continue;
+        s.y += bgScrollDy;
+        sb.y += bgScrollDy;
+        b.y += bgScrollDy;
+        if (s.y - s.displayHeight * 0.5 > this.scale.height + 120) {
+          s.destroy();
+          sb.destroy();
+          b.destroy();
+          this.gateTopSprites.splice(i, 1);
+          this.gateBottomSprites.splice(i, 1);
+          this.gateBlockers.splice(i, 1);
+        }
+      }
     }
   }
 }

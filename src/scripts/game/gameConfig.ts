@@ -6,9 +6,7 @@ export const MAIN_WORLD = {
 } as const;
 
 export const MAIN_PARALLAX_LAYERS: ParallaxLayerConfig[] = [
-  { speed: 22, colorA: 0x12151c, colorB: 0x1a1f28, bandHeight: 56 },
-  { speed: 48, colorA: 0x1c2330, colorB: 0x252d3d, bandHeight: 40 },
-  { speed: 86, colorA: 0x222c3f, colorB: 0x2f3d55, bandHeight: 28 },
+  { speed: 28, textureKey: 'bg_tile_base', alpha: 1 },
 ];
 
 /** Smaller scale so multiple carriages fit on screen. */
@@ -20,7 +18,7 @@ export const MAIN_TRAIN_SPAWN = {
   baseAcceleration: 110,
   baseBrakeDeceleration: 210,
   baseDragDeceleration: 46,
-  maxSpeed: 165,
+  maxSpeed: 58,
   maxHealth: 800,
   coalMax: 120,
   startingCoal: 100,

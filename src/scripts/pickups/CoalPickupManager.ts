@@ -2,7 +2,7 @@ import * as Phaser from 'phaser';
 import type { TrainController } from '../train/TrainController';
 
 type Pickup = {
-  sprite: Phaser.GameObjects.Arc;
+  sprite: Phaser.GameObjects.Image | Phaser.GameObjects.Arc;
   value: number;
 };
 
@@ -49,8 +49,16 @@ export class CoalPickupManager {
   }
 
   spawn(x: number, y: number, value: number): void {
-    const s = this.scene.add.circle(x, y, this.radius, this.fillColor, 1);
-    s.setStrokeStyle(2, this.strokeColor);
+    let s: Phaser.GameObjects.Image | Phaser.GameObjects.Arc;
+    if (this.scene.textures.exists('pickup_coal')) {
+      const img = this.scene.add.image(x, y, 'pickup_coal');
+      img.setDisplaySize(this.radius * 2.6, this.radius * 2.6);
+      s = img;
+    } else {
+      const fallback = this.scene.add.circle(x, y, this.radius, this.fillColor, 1);
+      fallback.setStrokeStyle(2, this.strokeColor);
+      s = fallback;
+    }
     s.setDepth(this.depth);
     this.pickups.push({ sprite: s, value });
   }

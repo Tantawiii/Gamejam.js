@@ -53,6 +53,7 @@ export abstract class Enemy implements Damageable {
   protected readonly maxHealth: number;
   protected healthBar: Phaser.GameObjects.Graphics;
   protected activeInWorld = true;
+  private externalSpeedMultiplier = 1;
 
   constructor(
     scene: Phaser.Scene,
@@ -262,6 +263,32 @@ export abstract class Enemy implements Damageable {
   addWorldOffset(dx: number, dy: number): void {
     this.sprite.setPosition(this.sprite.x + dx, this.sprite.y + dy);
     this.updateHealthBarPosition();
+  }
+
+  constrainAgainstRects(
+    rects: Array<{ x: number; y: number; width: number; height: number }>,
+  ): void {
+    for (const r of rects) {
+      const out = pushCircleOutOfCenteredRect(
+        this.sprite.x,
+        this.sprite.y,
+        this.getRadius(),
+        r.x,
+        r.y,
+        r.width,
+        r.height,
+      );
+      this.sprite.setPosition(out.x, out.y);
+    }
+    this.updateHealthBarPosition();
+  }
+
+  setExternalSpeedMultiplier(multiplier: number): void {
+    this.externalSpeedMultiplier = Phaser.Math.Clamp(multiplier, 0.2, 1.5);
+  }
+
+  protected getExternalSpeedMultiplier(): number {
+    return this.externalSpeedMultiplier;
   }
 
   /**

@@ -7,6 +7,7 @@ import type { Enemy } from '../enemy/Enemy';
 import { circleIntersectsCenteredRect } from '../enemy/circleRectIntersect';
 import { LongRangeEnemy } from '../enemy/LongRangeEnemy';
 import type { EnemyProjectileSpawn } from '../enemy/LongRangeEnemy';
+import { playBombTrainExplosionFx } from '../vfx/CollisionImpactVfx';
 import { getWaveConfig, type EnemyType } from './WaveConfiguration';
 
 /**
@@ -44,10 +45,10 @@ export interface WaveSystemCallback {
 }
 
 export class WaveSystem {
-  private static readonly BASIC_ENEMY_SPEED = 62;
-  private static readonly BOMB_ENEMY_SPEED = 62;
+  private static readonly BASIC_ENEMY_SPEED = 72;
+  private static readonly BOMB_ENEMY_SPEED = 76;
   private static readonly CHUNKY_ENEMY_SPEED = 62 * 0.5;
-  private static readonly LONG_RANGE_ENEMY_SPEED = 48;
+  private static readonly LONG_RANGE_ENEMY_SPEED = 72;
   private static readonly ENEMY_PROJECTILE_TTL_MS = 9000;
   /** Chunky enemies only spawn once the player reaches this level (1-based). */
   private static readonly CHUNKY_MIN_PLAYER_LEVEL = 3;
@@ -91,6 +92,8 @@ export class WaveSystem {
   private enemySpawnInterval: number = 200; // ms between spawning each enemy
   private readonly maxAliveAtOnce = 18;
   private nightIntensity = 0;
+  private slowFields: Array<{ x: number; y: number; radius: number; slowFactor: number }> = [];
+  private spawningPaused = false;
 
   constructor(
     scene: Phaser.Scene,
@@ -166,6 +169,14 @@ export class WaveSystem {
     this.nightIntensity = Phaser.Math.Clamp(value, 0, 1);
   }
 
+  setSlowFields(fields: Array<{ x: number; y: number; radius: number; slowFactor: number }>): void {
+    this.slowFields = fields;
+  }
+
+  setSpawningPaused(paused: boolean): void {
+    this.spawningPaused = paused;
+  }
+
   private getCurrentSpawnIntervalMs(): number {
     // Night spawns faster.
     return Math.max(80, this.enemySpawnInterval * (1 - this.nightIntensity * 0.4));
@@ -185,9 +196,6 @@ export class WaveSystem {
 
   /**
    * Get max health for enemy type
-   */
-  /**
-   * Basic enemies are disabled; remap to bomb so nothing spawns as BasicEnemy.
    */
   private resolveSpawnTypeAndHealth(
     type: EnemyType,
@@ -218,13 +226,13 @@ export class WaveSystem {
   private getMaxHealthForType(type: EnemyType): number {
     switch (type) {
       case 'basic':
-        return 50;
+        return 30;
       case 'bomb':
         return 30;
       case 'chunky':
-        return 300;
+        return 120;
       case 'long_range':
-        return 45;
+        return 30;
     }
   }
 
@@ -259,6 +267,9 @@ export class WaveSystem {
 
     let enemy: Enemy;
     const commonRadius = 9;
+    const cycleScale = 1 + this.spawnCycle * 0.08;
+    const speedScale = 1 + this.spawnCycle * 0.05;
+    const scaledHealth = Math.ceil(health * cycleScale);
 
     switch (type) {
       case 'basic': {
@@ -269,12 +280,12 @@ export class WaveSystem {
           x,
           y,
           commonRadius,
-          WaveSystem.BASIC_ENEMY_SPEED,
+          WaveSystem.BASIC_ENEMY_SPEED * speedScale,
           0xd73a49, // fillColor
           0xffb1ba, // strokeColor
           8, // depth
-          health,
-          10, // trainContactDamage
+          scaledHealth,
+          Math.ceil(10 * cycleScale), // trainContactDamage
           500, // trainContactCooldownMs
           () => this.getBasicEnemySpeedScale(),
         );
@@ -288,14 +299,14 @@ export class WaveSystem {
           x,
           y,
           commonRadius * 0.8,
-          WaveSystem.BOMB_ENEMY_SPEED,
+          WaveSystem.BOMB_ENEMY_SPEED * speedScale,
           0x800080, // fillColor
           0xff00ff, // strokeColor
           8, // depth
-          health,
+          scaledHealth,
           0, // trainContactDamage
           0, // trainContactCooldownMs
-          100, // explosionDamage
+          Math.ceil(10 * cycleScale), // explosionDamage
           (commonRadius * 0.8) * 2, // explosionRadius
         );
         break;
@@ -308,12 +319,12 @@ export class WaveSystem {
           x,
           y,
           commonRadius * 1.5,
-          WaveSystem.CHUNKY_ENEMY_SPEED,
+          WaveSystem.CHUNKY_ENEMY_SPEED * speedScale,
           0x8b4513, // fillColor
           0xd2691e, // strokeColor
           8, // depth
-          health,
-          20, // trainContactDamage
+          scaledHealth * 2,
+          Math.ceil(22 * cycleScale), // trainContactDamage
           500, // trainContactCooldownMs
         );
         break;
@@ -326,11 +337,11 @@ export class WaveSystem {
           x,
           y,
           commonRadius * 0.95,
-          WaveSystem.LONG_RANGE_ENEMY_SPEED,
+          WaveSystem.LONG_RANGE_ENEMY_SPEED * speedScale,
           0xffffff,
           0xffffff,
           8,
-          health,
+          scaledHealth,
           (shot) => this.enqueueEnemyProjectile(shot),
         );
         break;
@@ -422,6 +433,9 @@ export class WaveSystem {
    * Update wave system
    */
   update(deltaMs: number): void {
+    if (this.spawningPaused) {
+      return;
+    }
     // Spawn pending enemies gradually with alive cap
     this.spawnAcc += deltaMs;
     while (
@@ -561,6 +575,28 @@ export class WaveSystem {
     return false;
   }
 
+  tryHitEnemiesInRadius(x: number, y: number, radius: number, damage: number): number {
+    const rSq = radius * radius;
+    let hits = 0;
+    for (let i = this.waveEnemies.length - 1; i >= 0; i--) {
+      const e = this.waveEnemies[i];
+      if (!e || !e.isAlive()) continue;
+      const pos = e.getPosition();
+      const dx = pos.x - x;
+      const dy = pos.y - y;
+      if (dx * dx + dy * dy > rSq) continue;
+      hits += 1;
+      const wasDestroyed = e.takeDamage(damage);
+      if (!wasDestroyed) continue;
+      const type = this.getEnemyType(e);
+      e.playDeathFade((ex, ey) => this.callbacks.onEnemyDestroyed?.(ex, ey, type), () => {
+        this.enemyPools[type].push(e);
+      });
+      this.waveEnemies.splice(i, 1);
+    }
+    return hits;
+  }
+
   /**
    * Find closest living enemy
    */
@@ -586,10 +622,18 @@ export class WaveSystem {
     hulls: Array<{ x: number; y: number; width: number; height: number }>,
     onTrainDamaged?: () => void,
   ): void {
-    for (const e of this.waveEnemies) {
-      if (e.isAlive()) {
-        e.handleTrainCollision(hulls, onTrainDamaged);
-      }
+    for (let i = this.waveEnemies.length - 1; i >= 0; i--) {
+      const e = this.waveEnemies[i];
+      if (!e || !e.isAlive()) continue;
+      const didDamage = e.handleTrainCollision(hulls, onTrainDamaged);
+      if (!didDamage) continue;
+      const type = this.getEnemyType(e);
+      const pos = e.getPosition();
+      playBombTrainExplosionFx(this.scene, pos.x, pos.y, { depth: 25, displayWidth: 120 });
+      e.deactivateForPool();
+      this.enemyPools[type].push(e);
+      this.callbacks.onEnemyDestroyed?.(pos.x, pos.y, type);
+      this.waveEnemies.splice(i, 1);
     }
   }
 
@@ -599,8 +643,29 @@ export class WaveSystem {
   updateEnemies(deltaMs: number): void {
     for (const e of this.waveEnemies) {
       if (e.isAlive()) {
+        const pos = e.getPosition();
+        let stackedSlow = 0;
+        for (const field of this.slowFields) {
+          const dx = pos.x - field.x;
+          const dy = pos.y - field.y;
+          if (dx * dx + dy * dy <= field.radius * field.radius) {
+            stackedSlow += field.slowFactor;
+          }
+        }
+        e.setExternalSpeedMultiplier(1 - Phaser.Math.Clamp(stackedSlow, 0, 0.5));
         e.update(deltaMs);
         e.syncSpriteFacingForGameplayCamera();
+      }
+    }
+  }
+
+  constrainEnemiesToBlockers(
+    blockers: Array<{ x: number; y: number; width: number; height: number }>,
+  ): void {
+    if (blockers.length === 0) return;
+    for (const e of this.waveEnemies) {
+      if (e.isAlive()) {
+        e.constrainAgainstRects(blockers);
       }
     }
   }

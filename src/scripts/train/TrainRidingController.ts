@@ -63,6 +63,7 @@ export class TrainRidingController {
   updatePlayerMotion(
     deltaMs: number,
     camera: Phaser.Cameras.Scene2D.Camera,
+    extraBlockers: Phaser.GameObjects.Rectangle[] = [],
   ): void {
     if (this.riding) {
       this.player.applyRideFromTrainOffset(
@@ -78,7 +79,7 @@ export class TrainRidingController {
       this.player.sprite.setVisible(true);
       this.player.updateOnFoot(
         deltaMs,
-        this.train.getHullRects(),
+        [...this.train.getHullRects(), ...extraBlockers],
         camera,
         MAIN_PLAYER_VIEW_PAD,
       );

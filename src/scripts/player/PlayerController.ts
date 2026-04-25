@@ -18,7 +18,7 @@ export type PlayerControllerOptions = {
  * camera view and resolve the train hull analytically. Uses WASD.
  */
 export class PlayerController {
-  readonly sprite: Phaser.GameObjects.Arc;
+  readonly sprite: Phaser.GameObjects.Arc | Phaser.GameObjects.Image;
   private readonly walkSpeed: number;
   private walkSpeedMultiplier = 1;
   private readonly radius: number;
@@ -35,14 +35,15 @@ export class PlayerController {
     const depth = options.depth ?? 20;
     this.walkSpeed = options.walkSpeed ?? 220;
 
-    this.sprite = scene.add.circle(
-      options.x,
-      options.y,
-      this.radius,
-      fill,
-      1,
-    );
-    this.sprite.setStrokeStyle(strokeW, stroke);
+    if (scene.textures.exists('gosling_with_shadow')) {
+      const playerImage = scene.add.image(options.x, options.y, 'gosling_with_shadow');
+      playerImage.setDisplaySize(this.radius * 4.6, this.radius * 4.6);
+      this.sprite = playerImage;
+    } else {
+      const fallback = scene.add.circle(options.x, options.y, this.radius, fill, 1);
+      fallback.setStrokeStyle(strokeW, stroke);
+      this.sprite = fallback;
+    }
     this.sprite.setDepth(depth);
 
     const kb = scene.input.keyboard;

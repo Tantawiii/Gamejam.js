@@ -56,7 +56,6 @@ export class BasicEnemy extends Enemy {
   private readonly getSpeedScale: () => number;
   private readonly trainContactDamage: number;
   private readonly trainContactCooldownMs: number;
-  private attackCooldownMs: number = 0;
 
   constructor(
     scene: Phaser.Scene,
@@ -97,7 +96,7 @@ export class BasicEnemy extends Enemy {
   }
 
   update(deltaMs: number): void {
-    this.speed = this.baseSpeed * this.getSpeedScale();
+    this.speed = this.baseSpeed * this.getSpeedScale() * this.getExternalSpeedMultiplier();
     const dt = deltaMs / 1000;
     const tx = this.train.body.x;
     const ty = this.train.body.y;
@@ -107,32 +106,19 @@ export class BasicEnemy extends Enemy {
     const dy = ty - this.sprite.y;
     const distance = Math.hypot(dx, dy);
 
-    // Update attack cooldown
-    this.attackCooldownMs = Math.max(0, this.attackCooldownMs - deltaMs);
-
-    // If we're close enough to the train, attack when cooldown is ready
-    if (distance <= this.radius + 20) { // Attack range
-      if (this.attackCooldownMs <= 0) {
-        this.train.takeDamage(this.trainContactDamage);
-        this.attackCooldownMs = this.trainContactCooldownMs;
-      }
-    } else {
-      // Move towards train
-      if (distance > 1e-6) {
-        const normalizedDx = dx / distance;
-        const normalizedDy = dy / distance;
-        this.sprite.setPosition(
-          this.sprite.x + normalizedDx * this.speed * dt,
-          this.sprite.y + normalizedDy * this.speed * dt,
-        );
-        this.updateHealthBarPosition();
-      }
+    if (distance > 1e-6) {
+      const normalizedDx = dx / distance;
+      const normalizedDy = dy / distance;
+      this.sprite.setPosition(
+        this.sprite.x + normalizedDx * this.speed * dt,
+        this.sprite.y + normalizedDy * this.speed * dt,
+      );
+      this.updateHealthBarPosition();
     }
   }
 
   override resetForSpawn(x: number, y: number, health: number): void {
     super.resetForSpawn(x, y, health);
-    this.attackCooldownMs = 0;
   }
 
   getRadius(): number {

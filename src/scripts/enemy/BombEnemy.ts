@@ -74,6 +74,7 @@ import { playBombTrainExplosionFx } from '../vfx/CollisionImpactVfx';
  */
 export class BombEnemy extends Enemy {
   private readonly radius: number;
+  private readonly baseSpeed: number;
   private readonly explosionDamage: number;
   // @ts-ignore - Reserved for future area damage implementation
   private readonly _explosionRadius: number;
@@ -111,6 +112,7 @@ export class BombEnemy extends Enemy {
       true,
     );
     this.radius = radius;
+    this.baseSpeed = speed;
     this.explosionDamage = explosionDamage;
     this._explosionRadius = _explosionRadius;
   }
@@ -119,6 +121,7 @@ export class BombEnemy extends Enemy {
     // If sprite was destroyed, skip update
     if (!this.sprite) return;
 
+    this.speed = this.baseSpeed * this.getExternalSpeedMultiplier();
     // Move towards train only (not player)
     const dt = deltaMs / 1000;
     const tx = this.train.body.x;

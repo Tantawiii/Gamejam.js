@@ -62,31 +62,34 @@ export function getWaveConfig(
   // Base wave configs before multiplier
   const baseConfigs: Record<number, EnemySpec[]> = {
     1: [
-      { type: 'bomb', count: 20 },
-      { type: 'long_range', count: 10 },
+      { type: 'basic', count: 14 },
     ],
     2: [
-      { type: 'bomb', count: 25 },
-      { type: 'long_range', count: 15 },
+      { type: 'basic', count: 18 },
+      { type: 'long_range', count: 6 },
     ],
     3: [
-      { type: 'bomb', count: 28 },
-      { type: 'long_range', count: 12 },
+      { type: 'basic', count: 18 },
+      { type: 'bomb', count: 8 },
+      { type: 'long_range', count: 8 },
     ],
     4: [
-      { type: 'bomb', count: 22 },
-      { type: 'long_range', count: 12 },
-      { type: 'chunky', count: 8 },
+      { type: 'basic', count: 16 },
+      { type: 'bomb', count: 10 },
+      { type: 'long_range', count: 10 },
+      { type: 'chunky', count: 4 },
     ],
     5: [
-      { type: 'bomb', count: 18 },
-      { type: 'chunky', count: 10 },
-      { type: 'long_range', count: 15 },
+      { type: 'basic', count: 14 },
+      { type: 'bomb', count: 14 },
+      { type: 'chunky', count: 8 },
+      { type: 'long_range', count: 12 },
     ],
     6: [
-      { type: 'bomb', count: 22 },
-      { type: 'chunky', count: 12 },
-      { type: 'long_range', count: 18 },
+      { type: 'basic', count: 16 },
+      { type: 'bomb', count: 16 },
+      { type: 'chunky', count: 10 },
+      { type: 'long_range', count: 14 },
     ],
   };
 

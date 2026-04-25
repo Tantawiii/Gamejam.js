@@ -26,7 +26,7 @@ export class MainMenuScene extends Phaser.Scene {
       this.add
         .text(width / 2, height * 0.22, "Rails? WHAT'S DAT!", {
           fontFamily: 'Nosifer, system-ui, Segoe UI, Roboto, sans-serif',
-          fontSize: '84px',
+          fontSize: '58px',
           color: '#ff3434',
           align: 'center',
         })
