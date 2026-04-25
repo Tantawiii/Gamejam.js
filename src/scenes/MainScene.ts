@@ -59,14 +59,19 @@ export class MainScene extends Phaser.Scene {
   private wasPointerDown = false;
   private nextTrainHitShakeAt = 0;
   private nightTint?: Phaser.GameObjects.Rectangle;
+  private trainNightLight?: Phaser.GameObjects.Image;
+  private playerNightLight?: Phaser.GameObjects.Image;
   private railSegments: Phaser.GameObjects.Image[] = [];
   private gateTopSprites: Phaser.GameObjects.Image[] = [];
   private gateBottomSprites: Phaser.GameObjects.Image[] = [];
   private gateBlockers: Phaser.GameObjects.Rectangle[] = [];
-  private gateSpawnAccMs = 0;
+  private currentCameraZoom = 1;
   private dayNightCycleMs = 0;
   private hasShownFirstNightWarning = false;
   private readonly dayNightCycleDurationMs = 220000;
+  private readonly introScrollSpeed = 42;
+  private readonly nightWarningThreshold = 0.46;
+  private readonly nightLightStartThreshold = 0.32;
   private readonly introDialogue: Array<{ speaker: 'Dad' | 'Son'; text: string }> = [
     {
       speaker: 'Son',
@@ -99,6 +104,7 @@ export class MainScene extends Phaser.Scene {
   private playerLevel = 1;
   private currentExp = 0;
   private expectedExp = 1500;
+  private draftCount = 0;
 
   constructor() {
     super('MainScene');
@@ -110,11 +116,34 @@ export class MainScene extends Phaser.Scene {
       depth: -1000,
       layers: MAIN_PARALLAX_LAYERS,
     });
+    if (!this.textures.exists('night_light_stamp')) {
+      const g = this.add.graphics({ x: 0, y: 0 });
+      const r = 128;
+      for (let i = r; i > 0; i -= 4) {
+        const t = i / r;
+        g.fillStyle(0xffffff, 0.02 + t * 0.16);
+        g.fillCircle(r, r, i);
+      }
+      g.generateTexture('night_light_stamp', r * 2, r * 2);
+      g.destroy();
+    }
     this.nightTint = this.add
-      .rectangle(0, 0, this.scale.width, this.scale.height, 0x0b1220, 0)
+      .rectangle(0, 0, this.scale.width, this.scale.height, 0x05070d, 0)
       .setOrigin(0, 0)
       .setScrollFactor(0)
       .setDepth(6800);
+    this.trainNightLight = this.add
+      .image(-9999, -9999, 'night_light_stamp')
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setAlpha(0)
+      .setScrollFactor(0)
+      .setDepth(6801);
+    this.playerNightLight = this.add
+      .image(-9999, -9999, 'night_light_stamp')
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setAlpha(0)
+      .setScrollFactor(0)
+      .setDepth(6802);
     if (this.textures.exists('rail_vertical')) {
       const frame = this.textures.getFrame('rail_vertical');
       const srcW = frame?.width ?? 96;
@@ -176,6 +205,7 @@ export class MainScene extends Phaser.Scene {
       MAIN_WORLD.height,
       train.body,
     );
+    this.currentCameraZoom = 1;
 
     const keyRide = this.input.keyboard?.addKey(
       Phaser.Input.Keyboard.KeyCodes.E,
@@ -218,7 +248,7 @@ export class MainScene extends Phaser.Scene {
           // Enemy went off-screen and is being respawned
         },
       },
-      1.2, // difficultyMultiplier
+      1.04, // difficultyMultiplier
       320,
       620,
       () => this.playerLevel,
@@ -232,11 +262,11 @@ export class MainScene extends Phaser.Scene {
     this.engineSmoke = createGreySmokeVfx(this, {
       x: train.body.x,
       y: train.body.y,
-      depth: MAIN_TRAIN_SPAWN.depth + 30,
-      alpha: 0.92,
+      depth: MAIN_TRAIN_SPAWN.depth + 80,
+      alpha: 0.85,
       follow: train.body,
       followOffsetX: 0,
-      followOffsetY: -train.body.height * 0.55,
+      followOffsetY: -train.body.height * 0.42,
     });
 
     this.hud = new GameplayHud(this);
@@ -259,27 +289,76 @@ export class MainScene extends Phaser.Scene {
       this.introAutoTimer?.destroy();
       this.introTypeTimer?.destroy();
       this.nightTint?.destroy();
+      this.trainNightLight?.destroy();
+      this.playerNightLight?.destroy();
       this.gateTopSprites.forEach((g) => g.destroy());
       this.gateBottomSprites.forEach((g) => g.destroy());
       this.gateBlockers.forEach((g) => g.destroy());
     });
   }
 
-  private spawnRareGate(): void {
-    if (!this.textures.exists('bg_gate_1') || !this.textures.exists('bg_gate_2')) return;
-    const margin = 84;
-    const x = Phaser.Math.Between(margin, this.scale.width - margin);
-    const y = -120;
-    const top = this.add.image(x, y, 'bg_gate_1').setScrollFactor(0).setDepth(-850);
-    const bottomY = y + top.displayHeight * 0.54;
-    const bottom = this.add.image(x, bottomY, 'bg_gate_2').setScrollFactor(0).setDepth(-851);
-    const totalH = (bottom.y + bottom.displayHeight * 0.5) - (top.y - top.displayHeight * 0.5);
-    const blockCenterY = (top.y + bottom.y) * 0.5;
-    const block = this.add.rectangle(x, blockCenterY, top.width * 0.84, totalH * 0.72, 0xffffff, 0);
-    block.setScrollFactor(0).setDepth(-849);
-    this.gateTopSprites.push(top);
-    this.gateBottomSprites.push(bottom);
-    this.gateBlockers.push(block);
+  private renderNightLighting(nightStrength: number, ridingNow: boolean): void {
+    const tint = this.nightTint;
+    const trainLight = this.trainNightLight;
+    const playerLight = this.playerNightLight;
+    const train = this.train;
+    if (!tint || !trainLight || !playerLight || !train) return;
+    const darkness = 0.58 * Phaser.Math.Clamp(nightStrength, 0, 1);
+    const lightStrength = Phaser.Math.Clamp(
+      (nightStrength - this.nightLightStartThreshold) /
+        (1 - this.nightLightStartThreshold),
+      0,
+      1,
+    );
+    tint.setFillStyle(0x05070d, darkness);
+    if (darkness <= 0.001) {
+      trainLight.setAlpha(0);
+      playerLight.setAlpha(0);
+      return;
+    }
+
+    const cam = this.cameras.main;
+    const toScreenX = (wx: number) => wx - cam.worldView.x;
+    const toScreenY = (wy: number) => wy - cam.worldView.y;
+
+    // Train light: ellipse from full fleet bounds (engine + all carriages).
+    const hulls = train.getHullRects();
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const h of hulls) {
+      const l = h.x - h.width * 0.5;
+      const r = h.x + h.width * 0.5;
+      const t = h.y - h.height * 0.5;
+      const b = h.y + h.height * 0.5;
+      minX = Math.min(minX, l);
+      maxX = Math.max(maxX, r);
+      minY = Math.min(minY, t);
+      maxY = Math.max(maxY, b);
+    }
+    const fleetCenterX = (minX + maxX) * 0.5;
+    const fleetCenterY = (minY + maxY) * 0.5;
+    const fleetWidth = Math.max(1, maxX - minX);
+    const fleetHeight = Math.max(1, maxY - minY);
+    trainLight.setPosition(toScreenX(fleetCenterX), toScreenY(fleetCenterY));
+    const stampSize = 256;
+    const trainLightW = fleetWidth * 1.12;
+    const trainLightH = fleetHeight * 1.12;
+    trainLight.setScale(trainLightW / stampSize, trainLightH / stampSize);
+    trainLight.setAlpha(0.52 * lightStrength);
+
+    // On-foot light: circular lamp around player.
+    const player = this.player?.sprite;
+    if (!ridingNow && player) {
+      playerLight.setPosition(toScreenX(player.x), toScreenY(player.y));
+      const playerRadius = MAIN_PLAYER_VISUAL.radius * 2.3;
+      const playerScale = (playerRadius * 2) / stampSize;
+      playerLight.setScale(playerScale, playerScale);
+      playerLight.setAlpha(0.5 * lightStrength);
+    } else {
+      playerLight.setAlpha(0);
+    }
   }
 
   private rollExpDrop(type: EnemyType): number {
@@ -358,7 +437,8 @@ export class MainScene extends Phaser.Scene {
   }
 
   private showNightWarningBubble(): void {
-    const text = "Uh... night's here. Enemies get angry after dark. Great. Super great.";
+    const text =
+      "Oh what's this Emergency protocol memo: robots go haywire at night due to \"no sunlight power efficiency.\" Totally scientific. Definitely do not panic.";
     this.waves?.setSpawningPaused(true);
     const bubble = this.createSpeechBubble(54, this.scale.height - 220, 700, 150, 'Dad');
     bubble.content.setText(text);
@@ -386,12 +466,17 @@ export class MainScene extends Phaser.Scene {
     if (this.introCutsceneActive || !this.draft) return;
     const offers = this.rollCardOffers();
     this.draft.open(offers);
+    this.draftCount += 1;
   }
 
   private rollCardOffers(): CardOffer[] {
     const train = this.train;
     const turrets = this.turrets;
-    const cartOfferWeight = 0.16 + this.cardPity.getCartOfferWeightBonus();
+    const firstDraftBoost = this.draftCount === 0 ? 0.99 : 0;
+    const cartOfferWeight = Math.max(
+      firstDraftBoost,
+      0.16 + this.cardPity.getCartOfferWeightBonus(),
+    );
     const includeCart = Math.random() < cartOfferWeight;
     this.cardPity.recordCycle(includeCart);
     const pool: CardOffer[] = [
@@ -793,6 +878,13 @@ export class MainScene extends Phaser.Scene {
     const added = this.train?.addCarriage() ?? false;
     if (added && this.train && this.turrets) {
       this.turrets.rebuildFromTrain(this.train);
+      this.currentCameraZoom = Math.max(0.76, this.currentCameraZoom - 0.06);
+      this.tweens.add({
+        targets: this.cameras.main,
+        zoom: this.currentCameraZoom,
+        duration: 260,
+        ease: 'Sine.Out',
+      });
     }
   }
 
@@ -847,19 +939,22 @@ export class MainScene extends Phaser.Scene {
     const train = this.train;
     const accelerateDown = this.keyAccelerate?.isDown ?? false;
     const brakeDown = this.keyBrake?.isDown ?? false;
-    const shouldCruise = this.introCutsceneActive
-      ? true
-      : !gameplayLocked && ridingNow;
-
+    const shouldCruise = !this.introCutsceneActive && !gameplayLocked && ridingNow;
     this.train?.setCruising(shouldCruise);
     if (train) {
-      const accelerating = shouldCruise && accelerateDown;
-      const braking = shouldCruise && brakeDown;
-      const throttle = accelerating ? 1 : braking ? -1 : 0;
+      const throttle = this.introCutsceneActive
+        ? 0
+        : (shouldCruise && accelerateDown)
+          ? 1
+          : (shouldCruise && brakeDown)
+            ? -1
+            : 0;
       train.setThrottle(throttle);
     }
     this.train?.update(delta);
-    const trainScrollSpeed = train?.getSpeed() ?? 0;
+    const trainScrollSpeed = this.introCutsceneActive
+      ? this.introScrollSpeed
+      : (train?.getSpeed() ?? 0);
     const trainScrollDy = (trainScrollSpeed * delta) / 1000;
     let bgScrollDy = 0;
     if (train && trainScrollSpeed > 0) {
@@ -876,14 +971,22 @@ export class MainScene extends Phaser.Scene {
 
     const waves = this.waves;
     const nightStrength = this.computeNightStrength();
-    this.nightTint?.setAlpha(0.62 * nightStrength);
+    this.renderNightLighting(nightStrength, ridingNow);
     waves?.setNightIntensity(nightStrength);
-    if (!this.hasShownFirstNightWarning && nightStrength > 0.72 && !this.introCutsceneActive) {
+    const waveIsClear =
+      (waves?.getTotalAliveEnemies() ?? 0) <= 0 &&
+      (waves?.getTotalRemainingToSpawn() ?? 0) <= 0;
+    if (
+      !this.hasShownFirstNightWarning &&
+      nightStrength > this.nightWarningThreshold &&
+      !this.introCutsceneActive &&
+      waveIsClear
+    ) {
       this.hasShownFirstNightWarning = true;
       this.showNightWarningBubble();
     }
     if (this.introCutsceneActive && train && waves) {
-      this.turrets?.update(delta, train, waves, false);
+      this.turrets?.update(delta, train, waves, false, trainScrollSpeed);
     } else if (!cardsActive && train && waves) {
       waves.update(delta);
       waves.updateEnemies(delta);
@@ -901,9 +1004,9 @@ export class MainScene extends Phaser.Scene {
       };
       waves.updateEnemyProjectiles(delta, hulls, onTrainDamagedByEnemy);
       waves.updateCollisions(hulls, onTrainDamagedByEnemy);
-      const shots = this.turrets?.update(delta, train, waves, coalOk) ?? 0;
-      if (shots > 0 && coalOk) {
-        train.spendCoal(shots * 0.24);
+      const weaponFuel = this.turrets?.update(delta, train, waves, coalOk, trainScrollSpeed) ?? 0;
+      if (weaponFuel > 0 && coalOk) {
+        train.spendCoal(weaponFuel);
       }
       this.hud?.updateWaveInfo(waves);
     }
@@ -937,33 +1040,19 @@ export class MainScene extends Phaser.Scene {
     if (train?.isDestroyed) {
       this.scene.start('GameOverScene');
     }
-    // Rails are intentionally static (no parallax motion).
-
-    this.gateSpawnAccMs += delta;
-    if (this.gateSpawnAccMs >= 3000) {
-      this.gateSpawnAccMs = 0;
-      if (Math.random() < 0.2) {
-        this.spawnRareGate();
+    if (bgScrollDy > 0 && this.railSegments.length > 0) {
+      const segmentH = this.railSegments[0]?.displayHeight ?? 256;
+      for (const rail of this.railSegments) {
+        rail.y += bgScrollDy;
       }
-    }
-    if (bgScrollDy > 0) {
-      for (let i = this.gateTopSprites.length - 1; i >= 0; i--) {
-        const s = this.gateTopSprites[i];
-        const sb = this.gateBottomSprites[i];
-        const b = this.gateBlockers[i];
-        if (!s || !sb || !b) continue;
-        s.y += bgScrollDy;
-        sb.y += bgScrollDy;
-        b.y += bgScrollDy;
-        if (s.y - s.displayHeight * 0.5 > this.scale.height + 120) {
-          s.destroy();
-          sb.destroy();
-          b.destroy();
-          this.gateTopSprites.splice(i, 1);
-          this.gateBottomSprites.splice(i, 1);
-          this.gateBlockers.splice(i, 1);
+      for (const rail of this.railSegments) {
+        if (rail.y - segmentH * 0.5 > this.scale.height + segmentH) {
+          const topMost = Math.min(...this.railSegments.map((r) => r.y));
+          rail.y = topMost - segmentH + 1;
         }
       }
     }
+
+    // Gate overlays disabled for now.
   }
 }

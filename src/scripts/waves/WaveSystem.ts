@@ -90,7 +90,7 @@ export class WaveSystem {
   
   // Config
   private enemySpawnInterval: number = 200; // ms between spawning each enemy
-  private readonly maxAliveAtOnce = 18;
+  private readonly maxAliveAtOnce = 13;
   private nightIntensity = 0;
   private slowFields: Array<{ x: number; y: number; radius: number; slowFactor: number }> = [];
   private spawningPaused = false;
@@ -179,19 +179,19 @@ export class WaveSystem {
 
   private getCurrentSpawnIntervalMs(): number {
     // Night spawns faster.
-    return Math.max(80, this.enemySpawnInterval * (1 - this.nightIntensity * 0.4));
+    return Math.max(120, this.enemySpawnInterval * (1 - this.nightIntensity * 0.18));
   }
 
   private adjustHealthForNight(baseHealth: number): number {
     // Night enemies are tougher.
-    return Math.ceil(baseHealth * (1 + this.nightIntensity * 0.45));
+    return Math.ceil(baseHealth * (1 + this.nightIntensity * 0.18));
   }
 
   /**
    * Basic enemies accelerate as endless waves progress (spawnCycle ticks up each batch).
    */
   private getBasicEnemySpeedScale(): number {
-    return 1 + Math.min(2.8, this.spawnCycle * 0.11);
+    return 1 + Math.min(0.8, this.spawnCycle * 0.03);
   }
 
   /**
@@ -267,8 +267,8 @@ export class WaveSystem {
 
     let enemy: Enemy;
     const commonRadius = 9;
-    const cycleScale = 1 + this.spawnCycle * 0.08;
-    const speedScale = 1 + this.spawnCycle * 0.05;
+    const cycleScale = 1 + this.spawnCycle * 0.015;
+    const speedScale = 1 + this.spawnCycle * 0.01;
     const scaledHealth = Math.ceil(health * cycleScale);
 
     switch (type) {
@@ -354,30 +354,18 @@ export class WaveSystem {
 
   private getSpawnPointAroundScreen(): { x: number; y: number } {
     const cam = this.scene.cameras.main.worldView;
-    const margin = 80;
-    const side = Phaser.Math.Between(0, 3);
-    switch (side) {
-      case 0:
-        return {
-          x: Phaser.Math.Between(cam.x - margin, cam.right + margin),
-          y: cam.y - margin,
-        };
-      case 1:
-        return {
-          x: cam.right + margin,
-          y: Phaser.Math.Between(cam.y - margin, cam.bottom + margin),
-        };
-      case 2:
-        return {
-          x: Phaser.Math.Between(cam.x - margin, cam.right + margin),
-          y: cam.bottom + margin,
-        };
-      default:
-        return {
-          x: cam.x - margin,
-          y: Phaser.Math.Between(cam.y - margin, cam.bottom + margin),
-        };
-    }
+    const cx = cam.centerX;
+    const cy = cam.centerY;
+    const maxDim = Math.max(cam.width, cam.height);
+    // Spawn outside a "triple-zoom-out" envelope and outside current camera.
+    const spawnRadiusMin = maxDim * 1.7;
+    const spawnRadiusMax = maxDim * 2.35;
+    const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
+    const r = Phaser.Math.FloatBetween(spawnRadiusMin, spawnRadiusMax);
+    return {
+      x: cx + Math.cos(ang) * r,
+      y: cy + Math.sin(ang) * r,
+    };
   }
 
   private recycleEnemy(enemy: Enemy): void {
@@ -390,7 +378,12 @@ export class WaveSystem {
    * Check if enemy is off-screen (despawned)
    */
   private isEnemyOffScreen(x: number, y: number): boolean {
-    const margin = 200; // Buffer beyond screen
+    // Keep a large leash so far-spawned enemies can walk into view before recycling.
+    const margin = Math.max(
+      900,
+      Math.max(this.scene.cameras.main.worldView.width, this.scene.cameras.main.worldView.height) *
+        1.6,
+    );
     const cam = this.scene.cameras.main;
     const camX = cam.worldView.x;
     const camY = cam.worldView.y;
@@ -598,10 +591,26 @@ export class WaveSystem {
   }
 
   /**
-   * Find closest living enemy
+   * Closest living enemy for turret aim, with velocity for lead and a fresh hit position at fire time.
+   * `extraVelY` is world drift from train scroll (px/s), applied on top of `getAimVelocity()`.
    */
-  findClosestLivingEnemyTo(wx: number, wy: number): { x: number; y: number } | null {
-    let best: { x: number; y: number; d: number } | null = null;
+  findClosestLivingEnemyTarget(
+    wx: number,
+    wy: number,
+    extraVelY: number,
+  ): {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    getHitPosition: () => { x: number; y: number };
+  } | null {
+    let best: {
+      e: Enemy;
+      x: number;
+      y: number;
+      d: number;
+    } | null = null;
     for (const e of this.waveEnemies) {
       if (!e.isAlive()) continue;
       const pos = e.getPosition();
@@ -609,10 +618,27 @@ export class WaveSystem {
       const dy = pos.y - wy;
       const d = dx * dx + dy * dy;
       if (!best || d < best.d) {
-        best = { x: pos.x, y: pos.y, d };
+        best = { e, x: pos.x, y: pos.y, d };
       }
     }
-    return best ? { x: best.x, y: best.y } : null;
+    if (!best) return null;
+    const enemy = best.e;
+    const v = enemy.getAimVelocity();
+    return {
+      x: best.x,
+      y: best.y,
+      vx: v.vx,
+      vy: v.vy + extraVelY,
+      getHitPosition: () => enemy.getPosition(),
+    };
+  }
+
+  /**
+   * Find closest living enemy
+   */
+  findClosestLivingEnemyTo(wx: number, wy: number): { x: number; y: number } | null {
+    const t = this.findClosestLivingEnemyTarget(wx, wy, 0);
+    return t ? { x: t.x, y: t.y } : null;
   }
 
   /**

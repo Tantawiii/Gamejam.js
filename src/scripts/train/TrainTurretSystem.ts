@@ -3,8 +3,20 @@ import type { TrainController } from './TrainController';
 
 export type WeaponType = 'basic' | 'sniper' | 'shuriken' | 'caterpillar' | 'slow_dome';
 
+export type AimTargetSnapshot = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  getHitPosition: () => { x: number; y: number };
+};
+
 type EnemyTargetingSystem = {
-  findClosestLivingEnemyTo(wx: number, wy: number): { x: number; y: number } | null;
+  findClosestLivingEnemyTarget(
+    wx: number,
+    wy: number,
+    extraVelY: number,
+  ): AimTargetSnapshot | null;
   tryHitEnemyWithBullet(
     bx: number,
     by: number,
@@ -61,6 +73,22 @@ export class TrainTurretSystem {
   private readonly baseRotationSpeedRadPerSec = Phaser.Math.DegToRad(220);
   private readonly slowFieldByWeapon = 0.1;
   private readonly minLongRangeDistance = 170;
+  private readonly aimToleranceRad = Phaser.Math.DegToRad(8);
+  /** Fuel (coal) consumed per firing volley by weapon type (not per pellet). */
+  private readonly fuelCostPerVolley: Record<WeaponType, number> = {
+    basic: 0.22,
+    sniper: 0.58,
+    shuriken: 0.4,
+    caterpillar: 0.48,
+    slow_dome: 0,
+  };
+
+  /**
+   * Most weapon/bullet sprites are drawn facing up.
+   * `bullet_basic` and `bullet_sniper` are drawn facing up-right (north-east).
+   */
+  private readonly upFacingToWorldRotationOffset = Math.PI / 2;
+  private readonly northEastFacingToWorldRotationOffset = Math.PI / 4;
 
   constructor(
     scene: Phaser.Scene,
@@ -275,13 +303,64 @@ export class TrainTurretSystem {
     this.rotationSpeedMultiplier += amount;
   }
 
+  /**
+   * Where to aim so a constant-speed projectile from `px,py` meets a target moving at `evx,eVy`.
+   * Falls back to a simple time estimate if the quadratic has no sensible root.
+   */
+  private static solveLinearLead(
+    px: number,
+    py: number,
+    tx: number,
+    ty: number,
+    evx: number,
+    evy: number,
+    bulletSpeed: number,
+  ): { x: number; y: number; ang: number } {
+    const rx = tx - px;
+    const ry = ty - py;
+    const vv = evx * evx + evy * evy;
+    const s = Math.max(8, bulletSpeed);
+    const aCoef = vv - s * s;
+    const bCoef = 2 * (rx * evx + ry * evy);
+    const cCoef = rx * rx + ry * ry;
+    let t: number | null = null;
+    if (Math.abs(aCoef) < 1e-4) {
+      if (Math.abs(bCoef) >= 1e-6) {
+        const tLin = -cCoef / bCoef;
+        if (tLin > 0 && Number.isFinite(tLin)) {
+          t = tLin;
+        }
+      }
+    } else {
+      const disc = bCoef * bCoef - 4 * aCoef * cCoef;
+      if (disc >= 0) {
+        const sqrtD = Math.sqrt(disc);
+        const t1 = (-bCoef - sqrtD) / (2 * aCoef);
+        const t2 = (-bCoef + sqrtD) / (2 * aCoef);
+        const candidates = [t1, t2].filter((v) => v > 0 && Number.isFinite(v));
+        if (candidates.length > 0) {
+          t = Math.min(...candidates);
+        }
+      }
+    }
+    if (t === null || t > 7.5) {
+      t = Math.hypot(rx, ry) / s;
+    }
+    const ax = tx + evx * t;
+    const ay = ty + evy * t;
+    const dx = ax - px;
+    const dy = ay - py;
+    return { x: ax, y: ay, ang: Math.atan2(dy, dx) };
+  }
+
   update(
     deltaMs: number,
     train: TrainController,
     enemies: EnemyTargetingSystem,
     canFire: boolean,
+    trainScrollSpeedPxPerSec: number = 0,
   ): number {
-    let shotsFired = 0;
+    let fuelSpent = 0;
     const slowFields: SlowField[] = [];
     const mounts = train.getTurretWorldPositions();
     if (mounts.length !== this.guns.length) {
@@ -302,24 +381,56 @@ export class TrainTurretSystem {
       if (!gun || !m || !slot) continue;
       gun.setPosition(m.x, m.y);
 
-      const target = enemies.findClosestLivingEnemyTo(m.x, m.y);
+      const target = enemies.findClosestLivingEnemyTarget(
+        m.x,
+        m.y,
+        trainScrollSpeedPxPerSec,
+      );
       if (!target) {
         continue;
       }
 
-      const dx = target.x - m.x;
-      const dy = target.y - m.y;
-      const distance = Math.hypot(dx, dy);
+      const { x: ex, y: ey, vx: evx, vy: evy, getHitPosition } = target;
+      const distance = Math.hypot(ex - m.x, ey - m.y);
+      const stats = this.getWeaponStats(slot);
 
-      const ang = Math.atan2(dy, dx);
+      let ang: number;
+      let aimX: number;
+      let aimY: number;
+      if (slot.type === 'slow_dome') {
+        ang = Math.atan2(ey - m.y, ex - m.x);
+        aimX = ex;
+        aimY = ey;
+      } else {
+        const leadSpeed =
+          slot.type === 'sniper'
+            ? 5200
+            : slot.type === 'caterpillar'
+              ? Math.max(140, Math.hypot(stats.bulletSpeed, 185))
+              : stats.bulletSpeed;
+        const lead = TrainTurretSystem.solveLinearLead(
+          m.x,
+          m.y,
+          ex,
+          ey,
+          evx,
+          evy,
+          leadSpeed,
+        );
+        ang = lead.ang;
+        aimX = lead.x;
+        aimY = lead.y;
+      }
+      const desiredGunRotation = ang + this.upFacingToWorldRotationOffset;
       const maxStep =
         this.baseRotationSpeedRadPerSec *
         this.rotationSpeedMultiplier *
         (slot.type === 'sniper' ? 0.5 : 1) *
         (deltaMs / 1000);
-      gun.setRotation(Phaser.Math.Angle.RotateTo(gun.rotation, ang, maxStep));
+      gun.setRotation(
+        Phaser.Math.Angle.RotateTo(gun.rotation, desiredGunRotation, maxStep),
+      );
 
-      const stats = this.getWeaponStats(slot);
       if (slot.type === 'slow_dome') {
         if (!this.domes[i]) {
           const dome = this.scene.add.image(m.x, m.y, 'weapon_dome');
@@ -345,6 +456,14 @@ export class TrainTurretSystem {
         continue;
       }
 
+      // Weapon must finish aiming before it can fire.
+      const aimError = Math.abs(
+        Phaser.Math.Angle.Wrap(gun.rotation - desiredGunRotation),
+      );
+      if (aimError > this.aimToleranceRad) {
+        continue;
+      }
+
       // Only fire if target is within range AND on screen
       if (distance > stats.range) {
         continue;
@@ -362,14 +481,17 @@ export class TrainTurretSystem {
         continue;
       }
 
-      // Check if target is within camera bounds
-      if (target.x < camX || target.x > camX + camW || target.y < camY || target.y > camY + camH) {
+      // Lead aim point should be on-screen (enemy may be off-screen but volley still gated by range)
+      if (aimX < camX || aimX > camX + camW || aimY < camY || aimY > camY + camH) {
         continue;
       }
 
       this.fireAcc[i] = (this.fireAcc[i] ?? 0) + deltaMs;
       if ((this.fireAcc[i] ?? 0) < stats.interval) continue;
       this.fireAcc[i] = 0;
+
+      const volleyFuel = this.fuelCostPerVolley[slot.type];
+      fuelSpent += volleyFuel;
 
       const tipDist = 14;
       const tipX = m.x + Math.cos(ang) * tipDist;
@@ -378,16 +500,17 @@ export class TrainTurretSystem {
         const beam = this.scene.add.image(tipX, tipY, 'bullet_sniper');
         beam.setDepth(this.depth + 2);
         beam.setOrigin(0, 0.5);
-        beam.setRotation(ang);
-        beam.setScale(Math.max(0.6, distance / 64), 0.8);
+        beam.setRotation(ang + this.northEastFacingToWorldRotationOffset);
+        const beamLen = Math.max(24, Math.hypot(aimX - tipX, aimY - tipY));
+        beam.setScale(Math.max(0.6, beamLen / 64), 0.8);
         this.sniperBeams.push(beam);
         this.scene.time.delayedCall(120, () => {
           beam.destroy();
           const idx = this.sniperBeams.indexOf(beam);
           if (idx >= 0) this.sniperBeams.splice(idx, 1);
         });
-        enemies.tryHitEnemyWithBullet(target.x, target.y, 14, stats.damage);
-        shotsFired += 1;
+        const hp = getHitPosition();
+        enemies.tryHitEnemyWithBullet(hp.x, hp.y, 14, stats.damage);
         continue;
       }
 
@@ -407,6 +530,14 @@ export class TrainTurretSystem {
         const g = this.scene.add.image(tipX, tipY, bulletKey);
         g.setDepth(this.depth + 1);
         g.setScale(1);
+        if (slot.type === 'caterpillar') {
+          g.setRotation(0 + this.upFacingToWorldRotationOffset);
+        } else if (slot.type === 'shuriken') {
+          g.setRotation(shotAng + this.upFacingToWorldRotationOffset);
+        } else {
+          // W01 bullet art faces north-east.
+          g.setRotation(shotAng + this.northEastFacingToWorldRotationOffset);
+        }
         this.bullets.push({
           graphic: g,
           vx,
@@ -419,13 +550,12 @@ export class TrainTurretSystem {
           aoeRadius: slot.type === 'caterpillar' ? 58 : undefined,
           spin: slot.type === 'shuriken' ? Phaser.Math.FloatBetween(8, 12) : 0,
         });
-        shotsFired += 1;
       }
     }
 
     this.updateBullets(deltaMs, enemies);
     enemies.setSlowFields?.(slowFields);
-    return shotsFired;
+    return fuelSpent;
   }
 
   private updateBullets(deltaMs: number, enemies: EnemyTargetingSystem): void {
@@ -451,6 +581,12 @@ export class TrainTurretSystem {
       b.graphic.setPosition(nx, ny);
       if (b.kind === 'shuriken') {
         b.graphic.rotation += (b.spin ?? 0) * dt;
+      } else if (b.kind === 'caterpillar') {
+        const bulletAng = Math.atan2(b.vy, b.vx);
+        b.graphic.rotation = bulletAng + this.upFacingToWorldRotationOffset;
+      } else {
+        const bulletAng = Math.atan2(b.vy, b.vx);
+        b.graphic.rotation = bulletAng + this.northEastFacingToWorldRotationOffset;
       }
 
       // Only hit enemies if bullet is within camera bounds

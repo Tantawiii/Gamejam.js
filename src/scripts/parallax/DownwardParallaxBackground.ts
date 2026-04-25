@@ -54,6 +54,11 @@ export class DownwardParallaxBackground {
   constructor(scene: Phaser.Scene, options: DownwardParallaxOptions) {
     const { width, height } = scene.scale;
     const baseDepth = options.depth ?? -1000;
+    const coverageMultiplier = 3;
+    const tileW = width * coverageMultiplier;
+    const tileH = height * coverageMultiplier;
+    const originOffsetX = -((coverageMultiplier - 1) * width) * 0.5;
+    const originOffsetY = -((coverageMultiplier - 1) * height) * 0.5;
 
     options.layers.forEach((layer, layerIndex) => {
       const key = layer.textureKey ?? makeStripeTextureKey();
@@ -67,7 +72,7 @@ export class DownwardParallaxBackground {
         );
       }
 
-      const tile = scene.add.tileSprite(0, 0, width, height, key);
+      const tile = scene.add.tileSprite(originOffsetX, originOffsetY, tileW, tileH, key);
       tile.setOrigin(0, 0);
       tile.setScrollFactor(0);
       tile.setDepth(baseDepth + layerIndex);

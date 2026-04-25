@@ -260,6 +260,25 @@ export abstract class Enemy implements Damageable {
     return { x: this.sprite.x, y: this.sprite.y };
   }
 
+  /**
+   * World-space velocity (px/s) from current steering, excluding global scroll drift.
+   * Used for turret lead prediction; subclasses with unusual movement should override.
+   */
+  getAimVelocity(): { vx: number; vy: number } {
+    const tx = this.train.body.x;
+    const ty = this.train.body.y;
+    const dx = tx - this.sprite.x;
+    const dy = ty - this.sprite.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6) {
+      return { vx: 0, vy: 0 };
+    }
+    return {
+      vx: (dx / len) * this.speed,
+      vy: (dy / len) * this.speed,
+    };
+  }
+
   addWorldOffset(dx: number, dy: number): void {
     this.sprite.setPosition(this.sprite.x + dx, this.sprite.y + dy);
     this.updateHealthBarPosition();

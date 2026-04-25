@@ -35,7 +35,7 @@ type FleetPart = {
 export class TrainController {
   private readonly scene: Phaser.Scene;
   private readonly parts: FleetPart[] = [];
-  private readonly visualScale = 0.7;
+  private readonly visualScale = 0.58;
   private baseAcceleration: number;
   private baseBrakeDeceleration: number;
   private baseDragDeceleration: number;
@@ -91,6 +91,7 @@ export class TrainController {
       0xffffff,
       1,
     );
+    engineSprite.setDisplaySize(engineW, engineH);
     engine.setVisible(false);
     engine.setDepth(depth);
     this.parts.push({ rect: engine, sprite: engineSprite, isEngine: true });
@@ -121,6 +122,7 @@ export class TrainController {
     const sprite = this.scene.add
       .image(last.x, newY, 'train_back_cart')
       .setDepth(this.baseDepth + 0.1);
+    sprite.setDisplaySize(w, h);
     this.parts.push({ rect: r, sprite, isEngine: false });
     return true;
   }

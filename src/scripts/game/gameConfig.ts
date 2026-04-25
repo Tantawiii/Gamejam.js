@@ -21,7 +21,7 @@ export const MAIN_TRAIN_SPAWN = {
   maxSpeed: 58,
   maxHealth: 800,
   coalMax: 120,
-  startingCoal: 100,
+  startingCoal: 120,
   fillColor: 0x7a5c36,
   depth: 5,
   boardingRadius: 108,

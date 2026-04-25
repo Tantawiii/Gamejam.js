@@ -16,9 +16,9 @@ export type EnemyProjectileSpawn = {
 export class LongRangeEnemy extends Enemy {
   private readonly radius: number;
   private readonly projectileSpeed: number;
-  private readonly baseMoveSpeed: number;
-  private readonly preferredDistMin: number;
-  private readonly preferredDistMax: number;
+  protected readonly baseMoveSpeed: number;
+  protected readonly preferredDistMin: number;
+  protected readonly preferredDistMax: number;
   private readonly shotCooldownMs: number;
   private readonly shotDamage: number;
   private readonly queueProjectile: (shot: EnemyProjectileSpawn) => void;
@@ -172,5 +172,38 @@ export class LongRangeEnemy extends Enemy {
 
   getTrainContactCooldownMs(): number {
     return 500;
+  }
+
+  override getAimVelocity(): { vx: number; vy: number } {
+    const tx = this.train.body.x;
+    const ty = this.train.body.y;
+    const ex = this.sprite.x;
+    const ey = this.sprite.y;
+    const toTx = tx - ex;
+    const toTy = ty - ey;
+    const dist = Math.hypot(toTx, toTy);
+    if (dist < 1e-6) {
+      return { vx: 0, vy: 0 };
+    }
+    const ux = toTx / dist;
+    const uy = toTy / dist;
+    let mx = 0;
+    let my = 0;
+    if (dist < this.preferredDistMin) {
+      mx = -ux;
+      my = -uy;
+    } else if (dist > this.preferredDistMax) {
+      mx = ux;
+      my = uy;
+    } else {
+      mx = -uy;
+      my = ux;
+    }
+    const mLen = Math.hypot(mx, my);
+    if (mLen < 1e-6) {
+      return { vx: 0, vy: 0 };
+    }
+    const moveSpeed = this.baseMoveSpeed * this.getExternalSpeedMultiplier();
+    return { vx: (mx / mLen) * moveSpeed, vy: (my / mLen) * moveSpeed };
   }
 }

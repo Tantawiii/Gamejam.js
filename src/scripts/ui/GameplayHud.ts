@@ -9,13 +9,14 @@ import type { WaveSystem } from '../waves/WaveSystem';
 export class GameplayHud {
   private readonly scene: Phaser.Scene;
   private readonly gfx: Phaser.GameObjects.Graphics;
-  private readonly text: Phaser.GameObjects.Text;
+  private readonly hpBarText: Phaser.GameObjects.Text;
+  private readonly fuelBarText: Phaser.GameObjects.Text;
+  private readonly expBarText: Phaser.GameObjects.Text;
   private readonly cfg = MAIN_HUD_BARS;
   
   // Wave display
   private waveStartText?: Phaser.GameObjects.Text;
   private waveCompletedText?: Phaser.GameObjects.Text;
-  private waveInfoText?: Phaser.GameObjects.Text;
   private betweenWaveText?: Phaser.GameObjects.Text;
   private waveStartAlpha: number = 1;
   private betweenWaveTimer: number = 0;
@@ -28,27 +29,39 @@ export class GameplayHud {
     this.scene = scene;
     this.gfx = scene.add.graphics().setScrollFactor(0).setDepth(4999);
 
-    this.text = scene.add
-      .text(
-        this.cfg.x,
-        this.cfg.y + this.cfg.height * 2 + this.cfg.gap + 10,
-        '',
-        {
-          fontFamily: 'system-ui, Segoe UI, Roboto, sans-serif',
-          fontSize: '13px',
-          color: '#c9d1d9',
-        },
-      )
+    this.hpBarText = scene.add
+      .text(scene.scale.width * 0.5, 28, '', {
+        fontFamily: 'system-ui, Segoe UI, Roboto, sans-serif',
+        fontSize: '15px',
+        color: '#f0f6fc',
+        stroke: '#0f1720',
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5)
       .setScrollFactor(0)
       .setDepth(5000);
 
-    // Wave info at top left
-    this.waveInfoText = scene.add
-      .text(this.cfg.x, this.cfg.y, '', {
+    this.expBarText = scene.add
+      .text(scene.scale.width * 0.5, scene.scale.height - 26, '', {
         fontFamily: 'system-ui, Segoe UI, Roboto, sans-serif',
-        fontSize: '14px',
-        color: '#58a6ff',
+        fontSize: '15px',
+        color: '#f0f6fc',
+        stroke: '#0f1720',
+        strokeThickness: 3,
       })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(5000);
+
+    this.fuelBarText = scene.add
+      .text(scene.scale.width * 0.5, 52, '', {
+        fontFamily: 'system-ui, Segoe UI, Roboto, sans-serif',
+        fontSize: '15px',
+        color: '#f0f6fc',
+        stroke: '#0f1720',
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5)
       .setScrollFactor(0)
       .setDepth(5000);
 
@@ -96,14 +109,14 @@ export class GameplayHud {
 
   update(
     train: TrainController,
-    ridingTrain: boolean,
+    _ridingTrain: boolean,
     progression?: { level: number; currentExp: number; expectedExp: number },
   ): void {
     if (!this.visible) return;
 
     const c = this.cfg;
     const hpFrac = train.maxHealth > 0 ? train.health / train.maxHealth : 0;
-    const coalFrac = train.coalMax > 0 ? train.coal / train.coalMax : 0;
+    const fuelFrac = train.coalMax > 0 ? train.coal / train.coalMax : 0;
     if (progression) {
       this.playerLevel = progression.level;
       this.currentExp = progression.currentExp;
@@ -114,42 +127,52 @@ export class GameplayHud {
     const g = this.gfx;
     g.clear();
 
-    g.fillStyle(c.hpBg, 1);
-    g.fillRect(c.x, c.y, c.width, c.height);
+    const barWidth = 360;
+    const barHeight = 20;
+    const hpX = Math.floor(this.scene.scale.width * 0.5 - barWidth * 0.5);
+    const hpY = 18;
+    g.fillStyle(c.hpBg, 0.95);
+    g.fillRoundedRect(hpX, hpY, barWidth, barHeight, 6);
     g.fillStyle(c.hpFg, 1);
-    g.fillRect(c.x, c.y, c.width * Math.max(0, Math.min(1, hpFrac)), c.height);
+    g.fillRoundedRect(hpX, hpY, barWidth * Math.max(0, Math.min(1, hpFrac)), barHeight, 6);
+    this.hpBarText.setPosition(this.scene.scale.width * 0.5, hpY + barHeight * 0.5);
+    this.hpBarText.setText(`HP ${Math.ceil(train.health)}/${train.maxHealth}`);
 
-    const cy = c.y + c.height + c.gap;
-    g.fillStyle(c.coalBg, 1);
-    g.fillRect(c.x, cy, c.width, c.height);
-    g.fillStyle(c.coalFg, 1);
-    g.fillRect(c.x, cy, c.width * Math.max(0, Math.min(1, coalFrac)), c.height);
+    const fuelX = hpX;
+    const fuelY = hpY + barHeight + 8;
+    g.fillStyle(c.coalBg, 0.95);
+    g.fillRoundedRect(fuelX, fuelY, barWidth, barHeight, 6);
+    g.fillStyle(0x111111, 1);
+    g.fillRoundedRect(
+      fuelX,
+      fuelY,
+      barWidth * Math.max(0, Math.min(1, fuelFrac)),
+      barHeight,
+      6,
+    );
+    this.fuelBarText.setPosition(this.scene.scale.width * 0.5, fuelY + barHeight * 0.5);
+    this.fuelBarText.setText(`Fuel ${Math.ceil(train.coal)}/${train.coalMax}`);
 
-    const ey = cy + c.height + c.gap;
-    g.fillStyle(0x223042, 1);
-    g.fillRect(c.x, ey, c.width, c.height);
+    const expX = Math.floor(this.scene.scale.width * 0.5 - barWidth * 0.5);
+    const expY = this.scene.scale.height - 36;
+    g.fillStyle(0x223042, 0.95);
+    g.fillRoundedRect(expX, expY, barWidth, barHeight, 6);
     g.fillStyle(0x58a6ff, 1);
-    g.fillRect(c.x, ey, c.width * Math.max(0, Math.min(1, expFrac)), c.height);
-
-    const motion =
-      !train.hasCoal() && ridingTrain
-        ? 'No coal — train stopped'
-        : ridingTrain
-          ? 'Riding — W accelerate, S brake'
-          : 'On foot — board engine (E)';
-    const carts = `${train.getCarriageCount()}/${train.getMaxCarriageCount()}`;
-    this.text.setText(
-      `WASD · E board/leave (engine only)\nTrain HP ${Math.ceil(train.health)}/${train.maxHealth} · Fuel ${Math.ceil(train.coal)}/${train.coalMax}\nEXP Lv.${this.playerLevel} ${Math.floor(this.currentExp)}/${Math.floor(this.expectedExp)}\nSpeed ${Math.ceil(train.getSpeed())}/${Math.ceil(train.getMaxSpeed())} · Carts ${carts}\n${motion}`,
+    g.fillRoundedRect(expX, expY, barWidth * Math.max(0, Math.min(1, expFrac)), barHeight, 6);
+    this.expBarText.setPosition(this.scene.scale.width * 0.5, expY + barHeight * 0.5);
+    this.expBarText.setText(
+      `EXP Lv.${this.playerLevel} ${Math.floor(this.currentExp)}/${Math.floor(this.expectedExp)}`,
     );
   }
 
   setVisible(on: boolean): void {
     this.visible = on;
     this.gfx.setVisible(on);
-    this.text.setVisible(on);
+    this.hpBarText.setVisible(on);
+    this.fuelBarText.setVisible(on);
+    this.expBarText.setVisible(on);
     this.waveStartText?.setVisible(on);
     this.waveCompletedText?.setVisible(on);
-    this.waveInfoText?.setVisible(on);
     this.betweenWaveText?.setVisible(on);
   }
 
@@ -189,13 +212,7 @@ export class GameplayHud {
       }
     }
 
-    // Update wave info (alive and remaining)
-    const aliveCount = waves.getTotalAliveEnemies();
-    const remainingCount = waves.getTotalRemainingToSpawn();
-
-    if (this.waveInfoText) {
-      this.waveInfoText.setText(`Endless Run\nEnemies: ${aliveCount} alive\nIncoming: ${remainingCount}`);
-    }
+    // Top-left wave info removed per UI cleanup request.
 
     // Handle between-wave display
     if (waves.getState() === 'between_waves') {
@@ -218,10 +235,11 @@ export class GameplayHud {
 
   destroy(): void {
     this.gfx.destroy();
-    this.text.destroy();
+    this.hpBarText.destroy();
+    this.fuelBarText.destroy();
+    this.expBarText.destroy();
     this.waveStartText?.destroy();
     this.waveCompletedText?.destroy();
-    this.waveInfoText?.destroy();
     this.betweenWaveText?.destroy();
   }
 }
