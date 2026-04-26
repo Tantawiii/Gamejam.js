@@ -1,0 +1,5 @@
+# Replace with your game id from the Wavedash dashboard before upload.
+# https://docs.wavedash.com/ — run `wavedash dev` after `npm run build` for local sandbox.
+game_id = "j97es9a4npecxpb96d841dje4s85k91c"
+upload_dir = "./dist"
+entrypoint = "index.html"

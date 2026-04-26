@@ -131,7 +131,7 @@ export function registerAssets(scene: Phaser.Scene): void {
   );
   scene.load.spritesheet(
     'player_character_sheet',
-    encodePublicAssetUrl('assets/player/player .png'),
+    encodePublicAssetUrl('assets/player/player.png'),
     PLAYER_SPRITESHEET_CONFIG,
   );
   scene.load.image('train_engine_cart', encodePublicAssetUrl('assets/Train/Engine_Cart.png'));
@@ -171,11 +171,11 @@ export function registerAssets(scene: Phaser.Scene): void {
 
   scene.load.image(
     'train_smoke_frame_0',
-    encodePublicAssetUrl('assets/Smoke/smoke 1.png'),
+    encodePublicAssetUrl('assets/Smoke/smoke_1.png'),
   );
   scene.load.image(
     'train_smoke_frame_1',
-    encodePublicAssetUrl('assets/Smoke/smoke 2.png'),
+    encodePublicAssetUrl('assets/Smoke/smoke_2.png'),
   );
 }
 

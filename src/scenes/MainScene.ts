@@ -35,6 +35,7 @@ import {
 } from '../scripts/assets/registerAssets';
 import { playCollision02ExplosionFx } from '../scripts/vfx/CollisionImpactVfx';
 import { TrainFurnaceSmoke } from '../scripts/vfx/TrainFurnaceSmoke';
+import { submitRunScoreToWavedash } from '../scripts/wavedash/wavedashLeaderboard';
 
 /**
  * Starter scene — replace with your jam game.
@@ -1277,6 +1278,7 @@ export class MainScene extends Phaser.Scene {
     const timeStr = `${mm}:${ss.toString().padStart(2, '0')}`;
     const totalScore =
       Math.floor(this.trainTravelPx) + this.killScore + this.gooseScore;
+    submitRunScoreToWavedash(totalScore);
 
     const runStats = this.add
       .text(
