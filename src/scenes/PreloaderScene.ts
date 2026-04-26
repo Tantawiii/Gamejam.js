@@ -56,6 +56,11 @@ export class PreloaderScene extends Phaser.Scene {
     this.load.audio('bg_music', encodePublicAssetUrl('Sounds/bgMusic.mp3'));
     this.load.audio(SFX_BUTTON_KEY, encodePublicAssetUrl('Sounds/button.mp3'));
     this.load.audio(SFX_FOOTSTEP_KEY, encodePublicAssetUrl('Sounds/Footstep.mp3'));
+    this.load.audio('enemy_shot', 'Sounds/EnemyShot.mp3');
+
+    this.load.audio('Explosion_Sound', 'Sounds/Explode.mp3');
+
+    this.load.audio('bg_music', 'Sounds/bgMusic.mp3');
 
     this.load.script(
       'webfont',
