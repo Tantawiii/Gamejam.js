@@ -109,6 +109,27 @@ export function playBombTrainExplosionFx(
   });
 }
 
+/** Collision 02 only (train death sequence). Falls back to Collision 01 if frames missing. */
+export function playCollision02ExplosionFx(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  options?: CollisionImpactVfxOptions,
+): void {
+  if (!hasFullCollisionSet(scene, VFX_02_PREFIX, COLLISION_02_FRAME_COUNT)) {
+    const keys = collectSequentialFrameKeys(scene, VFX_01_PREFIX, COLLISION_01_FRAME_COUNT);
+    if (keys.length === 0) return;
+    playCollisionFrameSequence(scene, x, y, keys, options);
+    return;
+  }
+  const keys = collectSequentialFrameKeys(scene, VFX_02_PREFIX, COLLISION_02_FRAME_COUNT);
+  playCollisionFrameSequence(scene, x, y, keys, {
+    ...options,
+    displayWidth: options?.displayWidth ?? 170,
+    msPerFrame: options?.msPerFrame ?? 42,
+  });
+}
+
 /**
  * Standard enemy death / impact (non-bomb train explosion): Collision 01 only.
  */

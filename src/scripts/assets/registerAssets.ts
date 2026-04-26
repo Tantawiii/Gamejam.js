@@ -99,6 +99,10 @@ export function registerAssets(scene: Phaser.Scene): void {
   // Background and rare gate overlays
   scene.load.image('bg_tile_base', encodePublicAssetUrl('assets/Background/Untitled-1.png'));
   scene.load.image('bg_gate_1', encodePublicAssetUrl('assets/Background Assets/Untitled-2.png'));
+  scene.load.image(
+    'coal_recharge_station',
+    encodePublicAssetUrl('assets/Background Assets/Untitled-2.png'),
+  );
   scene.load.image('bg_gate_2', encodePublicAssetUrl('assets/Background Assets/Untitled-3.png'));
   // Decorative props
   for (let rock = 1; rock <= 8; rock++) {
@@ -120,9 +124,10 @@ export function registerAssets(scene: Phaser.Scene): void {
     scene.load.image(key, encodePublicAssetUrl(`assets/Trees/${file}`));
   }
 
-  scene.load.image(
-    'gosling_with_shadow',
+  scene.load.spritesheet(
+    'gosling_sheet',
     encodePublicAssetUrl('assets/Golden Goose/Gosling_with_shadow.png'),
+    { frameWidth: 32, frameHeight: 32 },
   );
   scene.load.spritesheet(
     'player_character_sheet',
@@ -137,6 +142,12 @@ export function registerAssets(scene: Phaser.Scene): void {
   scene.load.image('weapon_basic', encodePublicAssetUrl('assets/Weapons/W4.png'));
   scene.load.image('weapon_sniper', encodePublicAssetUrl('assets/Weapons/W5.png'));
   scene.load.image('weapon_dome', encodePublicAssetUrl('assets/Weapons/W3.png'));
+  for (let i = 0; i < 6; i++) {
+    scene.load.image(
+      `shield_frame_${i}`,
+      encodePublicAssetUrl(`assets/Shield/shield_frames_${i}.png`),
+    );
+  }
   scene.load.image('weapon_shuriken', encodePublicAssetUrl('assets/Weapons/W1.png'));
   scene.load.image('weapon_caterpillar', encodePublicAssetUrl('assets/Weapons/W2.png'));
   scene.load.image('bullet_basic', encodePublicAssetUrl('assets/Bullets/W01.png'));
@@ -157,4 +168,43 @@ export function registerAssets(scene: Phaser.Scene): void {
       encodePublicAssetUrl(`assets/CollisionFX/Collision 02/${frame}.png`),
     );
   }
+}
+
+/** Directional walk cycles: rows 0–3 × 6 frames (down, up, right, left). */
+export function ensureGoldenGooseWalkAnimations(scene: Phaser.Scene): void {
+  const sheet = 'gosling_sheet';
+  if (!scene.textures.exists(sheet)) return;
+  const mk = (key: string, start: number, end: number) => {
+    if (scene.anims.exists(key)) return;
+    scene.anims.create({
+      key,
+      frames: scene.anims.generateFrameNumbers(sheet, { start, end }),
+      frameRate: 10,
+      repeat: -1,
+    });
+  };
+  mk('gosling_walk_down', 0, 5);
+  mk('gosling_walk_up', 6, 11);
+  mk('gosling_walk_right', 12, 17);
+  mk('gosling_walk_left', 18, 23);
+}
+
+/** Call from MainScene.create (after assets are loaded). */
+export function ensureSlowDomeShieldAnimation(scene: Phaser.Scene): void {
+  if (scene.anims.exists('slow_dome_shield')) {
+    return;
+  }
+  scene.anims.create({
+    key: 'slow_dome_shield',
+    frames: [
+      { key: 'shield_frame_0' },
+      { key: 'shield_frame_1' },
+      { key: 'shield_frame_2' },
+      { key: 'shield_frame_3' },
+      { key: 'shield_frame_4' },
+      { key: 'shield_frame_5' },
+    ],
+    frameRate: 11,
+    repeat: -1,
+  });
 }

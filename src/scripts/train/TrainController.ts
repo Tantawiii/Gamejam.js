@@ -218,6 +218,11 @@ export class TrainController {
     return this.parts.map((p) => p.rect);
   }
 
+  /** Visible engine sprite (for VFX follow — hull rect is invisible). */
+  getEngineSprite(): Phaser.GameObjects.Image {
+    return this.parts[0]!.sprite;
+  }
+
   /**
    * Turret mounts: engine gets 2 side mounts near the body centerline.
    */

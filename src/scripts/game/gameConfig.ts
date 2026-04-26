@@ -106,11 +106,39 @@ export const MAIN_COAL_PICKUP = {
   magnetSpeed: 240,
 } as const;
 
+/** Rare parallax-scrolling hatch: 35% roll each scroll chunk; on-foot player steps on it to refill coal. */
+export const MAIN_COAL_RECHARGE_STATION = {
+  textureKey: 'coal_recharge_station',
+  depth: 7,
+  displayMaxPx: 88,
+  hitRadius: 36,
+  scrollPxPerRoll: 1150,
+  spawnChance: 0.35,
+  coalMin: 85,
+  coalMax: 125,
+} as const;
+
+/** Rare golden goose: 10% roll per scroll chunk; catch on foot for bonus score (192×256 sheet → 32×32 frames). */
+export const MAIN_GOLDEN_GOOSE = {
+  sheetKey: 'gosling_sheet',
+  depth: 13,
+  displayScale: 1.65,
+  hitRadius: 22,
+  scrollPxPerRoll: 1150,
+  spawnChance: 0.1,
+  scoreValue: 100,
+  wanderSpeed: 52,
+} as const;
+
 export const MAIN_WEAPON_VISUAL_DEPTH = 18;
 
+/** Chimney smoke above all train / weapon world sprites (still below fixed HUD). */
+export const MAIN_ENGINE_SMOKE_DEPTH = 400;
+
 export const MAIN_CAMERA_SHAKE_ON_TRAIN_HIT = {
-  durationMs: 70,
-  intensity: 0.0025,
+  durationMs: 110,
+  /** Phaser 4 default shake intensity is ~0.05; keep noticeable for shells + rams. */
+  intensity: 0.055,
 } as const;
 
 export const MAIN_TURRET_SYSTEM = {

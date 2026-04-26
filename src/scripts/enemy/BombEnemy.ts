@@ -3,6 +3,7 @@ import { Enemy } from './Enemy';
 import type { TrainController } from '../train/TrainController';
 import { circleIntersectsCenteredRect } from './circleRectIntersect';
 import { playBombTrainExplosionFx } from '../vfx/CollisionImpactVfx';
+import { MAIN_CAMERA_SHAKE_ON_TRAIN_HIT } from '../game/gameConfig';
 
 /**
  * BOMBENEMY.TS - Explosive Enemy That Self-Destructs
@@ -78,6 +79,7 @@ export class BombEnemy extends Enemy {
   private readonly explosionDamage: number;
   // @ts-ignore - Reserved for future area damage implementation
   private readonly _explosionRadius: number;
+  private readonly onExplodedOnTrain?: (x: number, y: number) => void;
 
   constructor(
     scene: Phaser.Scene,
@@ -95,6 +97,7 @@ export class BombEnemy extends Enemy {
     _trainContactCooldownMs: number, // Not used by bomb enemies
     explosionDamage: number,
     _explosionRadius: number, // Reserved for future area damage
+    onExplodedOnTrain?: (x: number, y: number) => void,
   ) {
     super(
       scene,
@@ -115,6 +118,7 @@ export class BombEnemy extends Enemy {
     this.baseSpeed = speed;
     this.explosionDamage = explosionDamage;
     this._explosionRadius = _explosionRadius;
+    this.onExplodedOnTrain = onExplodedOnTrain;
   }
 
   update(deltaMs: number): void {
@@ -156,9 +160,12 @@ export class BombEnemy extends Enemy {
         const ex = this.sprite.x;
         const ey = this.sprite.y;
         this.train.takeDamage(this.explosionDamage);
+        const cam = this.scene.cameras.main;
+        const s = MAIN_CAMERA_SHAKE_ON_TRAIN_HIT;
+        cam.shake(s.durationMs, s.intensity * 1.35, true);
         playBombTrainExplosionFx(this.scene, ex, ey, { depth: this.sprite.depth + 12 });
         this.currentHealth = 0; // Mark as dead
-        this.destroy();
+        this.destroy((px, py) => this.onExplodedOnTrain?.(px, py));
         return;
       }
     }

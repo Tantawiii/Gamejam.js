@@ -1,4 +1,5 @@
 import * as Phaser from 'phaser';
+import type { EnemyType } from '../waves/WaveConfiguration';
 import type { TrainController } from './TrainController';
 
 export type WeaponType = 'basic' | 'sniper' | 'shuriken' | 'caterpillar' | 'slow_dome';
@@ -16,6 +17,7 @@ type EnemyTargetingSystem = {
     wx: number,
     wy: number,
     extraVelY: number,
+    ignoreTypes?: readonly EnemyType[],
   ): AimTargetSnapshot | null;
   tryHitEnemyWithBullet(
     bx: number,
@@ -25,6 +27,7 @@ type EnemyTargetingSystem = {
   ): boolean;
   tryHitEnemiesInRadius?: (x: number, y: number, radius: number, damage: number) => number;
   setSlowFields?: (fields: SlowField[]) => void;
+  countEnemiesInRadius?: (wx: number, wy: number, radius: number) => number;
 };
 
 type Bullet = {
@@ -35,9 +38,13 @@ type Bullet = {
   lifeMs: number;
   damage: number;
   radius: number;
+  /** Optional larger hit radius (e.g. shuriken) without changing sprite scale. */
+  hitRadius?: number;
   kind: 'basic' | 'shuriken' | 'caterpillar';
   aoeRadius?: number;
   spin?: number;
+  /** Straight-line travel angle; sprite pitch is faked in update for a “drop” look. */
+  caterpillarFallVis?: { initialLifeMs: number; travelAng: number };
 };
 
 type SlowField = {
@@ -55,7 +62,7 @@ type WeaponSlot = {
 export class TrainTurretSystem {
   private readonly scene: Phaser.Scene;
   private guns: Phaser.GameObjects.Image[] = [];
-  private domes: Array<Phaser.GameObjects.Image | null> = [];
+  private domes: Array<Phaser.GameObjects.Image | Phaser.GameObjects.Sprite | null> = [];
   private sniperBeams: Phaser.GameObjects.Image[] = [];
   private readonly fireAcc: number[] = [];
   private readonly bullets: Bullet[] = [];
@@ -71,17 +78,14 @@ export class TrainTurretSystem {
   private attackSpeedMultiplier = 1;
   private rotationSpeedMultiplier = 1;
   private readonly baseRotationSpeedRadPerSec = Phaser.Math.DegToRad(220);
-  private readonly slowFieldByWeapon = 0.1;
-  private readonly minLongRangeDistance = 170;
+  private readonly slowFieldByWeapon = 0.18;
+  private readonly caterpillarMinFireDistance = 170;
   private readonly aimToleranceRad = Phaser.Math.DegToRad(8);
-  /** Fuel (coal) consumed per firing volley by weapon type (not per pellet). */
-  private readonly fuelCostPerVolley: Record<WeaponType, number> = {
-    basic: 0.22,
-    sniper: 0.58,
-    shuriken: 0.4,
-    caterpillar: 0.48,
-    slow_dome: 0,
-  };
+  private readonly sniperAimToleranceRad = Phaser.Math.DegToRad(5);
+  private static readonly COAL_PER_SNIPER_SHOT = 15;
+  private static readonly COAL_PER_CATERPILLAR_SHOT = 3;
+  private static readonly COAL_PER_BASIC_SHOT = 1;
+  private static readonly COAL_PER_SHURIKEN_VOLLEY = 2;
 
   /**
    * Most weapon/bullet sprites are drawn facing up.
@@ -150,14 +154,18 @@ export class TrainTurretSystem {
   }
 
   private getWeaponStats(slot: WeaponSlot) {
-    const levelScale = 1 + (slot.level - 1) * 0.14;
-    switch (slot.type) {
+    return this.getWeaponStatsForLevel(slot.type, slot.level);
+  }
+
+  private getWeaponStatsForLevel(type: WeaponType, level: number) {
+    const levelScale = 1 + (level - 1) * 0.14;
+    switch (type) {
       case 'basic':
         return {
           interval: this.fireIntervalMs / (levelScale * this.attackSpeedMultiplier),
           bulletSpeed: this.bulletSpeed,
           bulletLifeMs: this.bulletLifeMs,
-          range: this.firingRange * this.rangeMultiplier,
+          range: this.firingRange * 0.78 * this.rangeMultiplier,
           damage: 30 * levelScale * this.damageMultiplier,
           pellets: 1 as const,
           spreadRad: 0 as const,
@@ -166,7 +174,7 @@ export class TrainTurretSystem {
       case 'sniper':
         return {
           interval:
-            (this.fireIntervalMs * 2.0) /
+            (this.fireIntervalMs * 3.25) /
             (levelScale * this.attackSpeedMultiplier),
           bulletSpeed: 0,
           bulletLifeMs: 120,
@@ -192,7 +200,7 @@ export class TrainTurretSystem {
       case 'caterpillar':
         return {
           interval: (this.fireIntervalMs * 1.7) / (levelScale * this.attackSpeedMultiplier),
-          bulletSpeed: 120,
+          bulletSpeed: 270,
           bulletLifeMs: this.bulletLifeMs * 1.9,
           range: this.firingRange * 1.2 * this.rangeMultiplier,
           damage: 70 * levelScale * this.damageMultiplier,
@@ -205,13 +213,70 @@ export class TrainTurretSystem {
           interval: 9999999,
           bulletSpeed: 0,
           bulletLifeMs: 0,
-          range: this.firingRange * 0.62 * this.rangeMultiplier,
+          range: this.firingRange * 0.4 * this.rangeMultiplier,
           damage: 0,
           pellets: 0 as const,
           spreadRad: 0 as const,
           radiusScale: 0 as const,
         };
     }
+  }
+
+  getBestWeaponLevel(type: WeaponType): number {
+    let best = 0;
+    for (const s of this.slotWeapons) {
+      if (s?.type === type) {
+        best = Math.max(best, s.level);
+      }
+    }
+    return best;
+  }
+
+  /** Level of the copy that {@link upgradeMatchingWeapon} upgrades first (slot order). */
+  getFirstMatchingWeaponLevel(type: WeaponType): number | null {
+    for (const s of this.slotWeapons) {
+      if (s?.type === type) return s.level;
+    }
+    return null;
+  }
+
+  private formatWeaponStatsLineAtLevel(type: WeaponType, level: number): string {
+    const st = this.getWeaponStatsForLevel(type, level);
+    const slowPct = Math.round(this.slowFieldByWeapon * 100);
+    switch (type) {
+      case 'basic':
+        return `DMG ${Math.round(st.damage)}, ${(1000 / st.interval).toFixed(1)}/s, rng ${Math.round(st.range)}px`;
+      case 'sniper':
+        return `DMG ${Math.round(st.damage)}, ${(st.interval / 1000).toFixed(1)}s cadence, rng ${Math.round(st.range)}px, ${TrainTurretSystem.COAL_PER_SNIPER_SHOT} coal/shot`;
+      case 'shuriken':
+        return `DMG ${Math.round(st.damage)}×${st.pellets}, ${(1000 / st.interval).toFixed(1)}/s, rng ${Math.round(st.range)}px`;
+      case 'caterpillar':
+        return `DMG ${Math.round(st.damage)}, ${(st.interval / 1000).toFixed(1)}s volley, rng ${Math.round(st.range)}px, ${TrainTurretSystem.COAL_PER_CATERPILLAR_SHOT} coal/shot`;
+      case 'slow_dome':
+        return `Aura ${Math.round(st.range)}px, ~${slowPct}% slow, 1 coal/s +1/enemy/s in aura`;
+    }
+  }
+
+  /** Main draft card: current best copy if you own it, otherwise Lv1 preview. */
+  getWeaponCardDraftBlurb(type: WeaponType): string {
+    const best = this.getBestWeaponLevel(type);
+    const lv = best > 0 ? best : 1;
+    const line = this.formatWeaponStatsLineAtLevel(type, lv);
+    return best > 0 ? `Strongest copy Lv${lv}: ${line}` : `New turret Lv1: ${line}`;
+  }
+
+  /** Add-to-slot step: new mount is always level 1. */
+  getWeaponAddSlotChoiceBlurb(type: WeaponType): string {
+    return `Lv1: ${this.formatWeaponStatsLineAtLevel(type, 1)}`;
+  }
+
+  /** Upgrade step: stats for the copy that will receive +1 level first. */
+  getWeaponUpgradeChoiceBlurb(type: WeaponType): string {
+    const lv = this.getFirstMatchingWeaponLevel(type);
+    if (lv == null) return '';
+    const cur = this.formatWeaponStatsLineAtLevel(type, lv);
+    const next = this.formatWeaponStatsLineAtLevel(type, lv + 1);
+    return `First slotted copy Lv${lv} → Lv${lv + 1}\n\nNOW\n${cur}\n\nAFTER\n${next}`;
   }
 
   private applyGunStyle(
@@ -380,6 +445,7 @@ export class TrainTurretSystem {
         m.x,
         m.y,
         trainScrollSpeedPxPerSec,
+        slot.type === 'caterpillar' ? (['long_range'] as const) : undefined,
       );
       if (!target && slot.type !== 'shuriken') {
         continue;
@@ -408,9 +474,7 @@ export class TrainTurretSystem {
           const leadSpeed =
             slot.type === 'sniper'
               ? 5200
-              : slot.type === 'caterpillar'
-                ? Math.max(140, Math.hypot(stats.bulletSpeed, 185))
-                : stats.bulletSpeed;
+              : stats.bulletSpeed;
           const lead = TrainTurretSystem.solveLinearLead(
             m.x,
             m.y,
@@ -425,10 +489,11 @@ export class TrainTurretSystem {
           aimY = lead.y;
         }
         const desiredGunRotation = ang + this.upFacingToWorldRotationOffset;
+        const rotMul = slot.type === 'sniper' ? 0.72 : 1;
         const maxStep =
           this.baseRotationSpeedRadPerSec *
           this.rotationSpeedMultiplier *
-          (slot.type === 'sniper' ? 0.5 : 1) *
+          rotMul *
           (deltaMs / 1000);
         gun.setRotation(
           Phaser.Math.Angle.RotateTo(gun.rotation, desiredGunRotation, maxStep),
@@ -436,20 +501,37 @@ export class TrainTurretSystem {
       }
 
       if (slot.type === 'slow_dome') {
-        if (!this.domes[i]) {
-          const dome = this.scene.add.image(m.x, m.y, 'weapon_dome');
-          dome.setAlpha(0.22);
-          dome.setDepth(this.depth - 1);
-          this.domes[i] = dome;
+        if (!canFire) {
+          if (this.domes[i]) {
+            this.domes[i]?.destroy();
+            this.domes[i] = null;
+          }
+          continue;
         }
-        this.domes[i]?.setPosition(m.x, m.y);
-        this.domes[i]?.setScale(1);
+        const domeDiam = stats.range * 2;
+        let dome = this.domes[i];
+        if (!dome || !(dome instanceof Phaser.GameObjects.Sprite)) {
+          dome?.destroy();
+          const s = this.scene.add.sprite(m.x, m.y, 'shield_frame_0');
+          s.setOrigin(0.5, 0.5);
+          s.setDepth(this.depth - 1);
+          if (this.scene.anims.exists('slow_dome_shield')) {
+            s.play('slow_dome_shield');
+          }
+          this.domes[i] = s;
+          dome = s;
+        }
+        dome.setPosition(m.x, m.y);
+        dome.setAlpha(0.4);
+        dome.setDisplaySize(domeDiam, domeDiam);
         slowFields.push({
           x: m.x,
           y: m.y,
           radius: stats.range,
           slowFactor: this.slowFieldByWeapon,
         });
+        const inAura = enemies.countEnemiesInRadius?.(m.x, m.y, stats.range) ?? 0;
+        fuelSpent += (deltaMs / 1000) * (1 + inAura);
         continue;
       } else if (this.domes[i]) {
         this.domes[i]?.destroy();
@@ -460,13 +542,15 @@ export class TrainTurretSystem {
         continue;
       }
 
-      // Weapon must finish aiming before it can fire.
+      // Weapon must finish aiming before it can fire (sniper snaps aim; still gate on alignment).
       if (slot.type !== 'shuriken') {
         const desiredGunRotation = ang + this.upFacingToWorldRotationOffset;
         const aimError = Math.abs(
           Phaser.Math.Angle.Wrap(gun.rotation - desiredGunRotation),
         );
-        if (aimError > this.aimToleranceRad) {
+        const tol =
+          slot.type === 'sniper' ? this.sniperAimToleranceRad : this.aimToleranceRad;
+        if (aimError > tol) {
           continue;
         }
       }
@@ -475,10 +559,7 @@ export class TrainTurretSystem {
       if (slot.type !== 'shuriken' && distance > stats.range) {
         continue;
       }
-      if (
-        (slot.type === 'sniper' || slot.type === 'caterpillar') &&
-        distance < this.minLongRangeDistance
-      ) {
+      if (slot.type === 'caterpillar' && distance < this.caterpillarMinFireDistance) {
         continue;
       }
 
@@ -486,17 +567,25 @@ export class TrainTurretSystem {
       if ((this.fireAcc[i] ?? 0) < stats.interval) continue;
       this.fireAcc[i] = 0;
 
-      const volleyFuel = this.fuelCostPerVolley[slot.type];
-      fuelSpent += volleyFuel;
+      if (slot.type === 'sniper') {
+        fuelSpent += TrainTurretSystem.COAL_PER_SNIPER_SHOT;
+      } else if (slot.type === 'caterpillar') {
+        fuelSpent += TrainTurretSystem.COAL_PER_CATERPILLAR_SHOT;
+      } else if (slot.type === 'basic') {
+        fuelSpent += TrainTurretSystem.COAL_PER_BASIC_SHOT;
+      } else if (slot.type === 'shuriken') {
+        fuelSpent += TrainTurretSystem.COAL_PER_SHURIKEN_VOLLEY;
+      }
 
-      const tipDist = 14;
+      const tipDist = slot.type === 'sniper' ? 20 : 14;
       const tipX = m.x + Math.cos(ang) * tipDist;
       const tipY = m.y + Math.sin(ang) * tipDist;
       if (slot.type === 'sniper') {
         const beam = this.scene.add.image(tipX, tipY, 'bullet_sniper');
         beam.setDepth(this.depth + 2);
         beam.setOrigin(0, 0.5);
-        beam.setRotation(ang + this.northEastFacingToWorldRotationOffset);
+        // Beam art extends along +X; align with shot direction (barrel / world angle).
+        beam.setRotation(ang);
         const beamLen = Math.max(24, Math.hypot(aimX - tipX, aimY - tipY));
         beam.setScale(Math.max(0.6, beamLen / 64), 0.8);
         this.sniperBeams.push(beam);
@@ -540,14 +629,22 @@ export class TrainTurretSystem {
         this.bullets.push({
           graphic: g,
           vx,
-          vy: slot.type === 'caterpillar' ? -190 : vy,
-          ay: slot.type === 'caterpillar' ? 520 : 0,
+          vy,
+          ay: 0,
           lifeMs: stats.bulletLifeMs,
           damage: stats.damage,
           radius: this.bulletRadius * stats.radiusScale,
+          hitRadius:
+            slot.type === 'shuriken'
+              ? this.bulletRadius * stats.radiusScale * 1.85
+              : undefined,
           kind: slot.type === 'shuriken' ? 'shuriken' : slot.type === 'caterpillar' ? 'caterpillar' : 'basic',
           aoeRadius: slot.type === 'caterpillar' ? 58 : undefined,
           spin: slot.type === 'shuriken' ? Phaser.Math.FloatBetween(8, 12) : 0,
+          caterpillarFallVis:
+            slot.type === 'caterpillar'
+              ? { initialLifeMs: stats.bulletLifeMs, travelAng: shotAng }
+              : undefined,
         });
       }
     }
@@ -559,12 +656,6 @@ export class TrainTurretSystem {
 
   private updateBullets(deltaMs: number, enemies: EnemyTargetingSystem): void {
     const dt = deltaMs / 1000;
-    const cam = this.scene.cameras.main;
-    const camX = cam.worldView.x;
-    const camY = cam.worldView.y;
-    const camW = cam.worldView.width;
-    const camH = cam.worldView.height;
-    
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
       if (!b) continue;
@@ -580,6 +671,13 @@ export class TrainTurretSystem {
       b.graphic.setPosition(nx, ny);
       if (b.kind === 'shuriken') {
         b.graphic.rotation += (b.spin ?? 0) * dt;
+      } else if (b.kind === 'caterpillar' && b.caterpillarFallVis) {
+        const maxL = b.caterpillarFallVis.initialLifeMs;
+        const t = Phaser.Math.Clamp(1 - b.lifeMs / maxL, 0, 1);
+        const eased = t * t * (3 - 2 * t);
+        const travelAng = b.caterpillarFallVis.travelAng;
+        const dropTilt = (1 - eased) * Phaser.Math.DegToRad(52);
+        b.graphic.rotation = travelAng + dropTilt + this.upFacingToWorldRotationOffset;
       } else if (b.kind === 'caterpillar') {
         const bulletAng = Math.atan2(b.vy, b.vx);
         b.graphic.rotation = bulletAng + this.upFacingToWorldRotationOffset;
@@ -588,18 +686,19 @@ export class TrainTurretSystem {
         b.graphic.rotation = bulletAng + this.northEastFacingToWorldRotationOffset;
       }
 
-      // Only hit enemies if bullet is within camera bounds
-      const isOnScreen = nx >= camX && nx <= camX + camW && ny >= camY && ny <= camY + camH;
-      if (isOnScreen) {
-        let hit = enemies.tryHitEnemyWithBullet(nx, ny, b.radius, b.damage);
-        if (!hit && b.kind === 'caterpillar' && b.vy > 0 && b.aoeRadius) {
-          const hits = enemies.tryHitEnemiesInRadius?.(nx, ny, b.aoeRadius, b.damage * 0.7) ?? 0;
-          hit = hits > 0;
-        }
-        if (hit) {
-          b.graphic.destroy();
-          this.bullets.splice(i, 1);
-        }
+      const hitR = b.hitRadius ?? b.radius;
+      let hit = enemies.tryHitEnemyWithBullet(nx, ny, hitR, b.damage);
+      const caterpillarSplashPhase =
+        b.kind === 'caterpillar' &&
+        b.caterpillarFallVis &&
+        1 - b.lifeMs / b.caterpillarFallVis.initialLifeMs > 0.18;
+      if (!hit && caterpillarSplashPhase && b.aoeRadius) {
+        const hits = enemies.tryHitEnemiesInRadius?.(nx, ny, b.aoeRadius, b.damage * 0.7) ?? 0;
+        hit = hits > 0;
+      }
+      if (hit) {
+        b.graphic.destroy();
+        this.bullets.splice(i, 1);
       }
     }
   }

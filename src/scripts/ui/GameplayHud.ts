@@ -184,9 +184,10 @@ export class GameplayHud {
    */
   onWaveStarted(waveNumber: number, _totalEnemies: number): void {
     this.waveStartAlpha = 1;
-    if (this.waveStartText) {
-      this.waveStartText.setText(`Wave ${waveNumber}`);
-      this.waveStartText.setAlpha(1);
+    const t = this.waveStartText;
+    if (t && t.scene && t.active) {
+      t.setText(`Wave ${waveNumber}`);
+      t.setAlpha(1);
     }
   }
 

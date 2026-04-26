@@ -6,24 +6,34 @@ import { WaveSystem } from '../scripts/waves/WaveSystem';
 import type { EnemyType } from '../scripts/waves/WaveConfiguration';
 import { DownwardParallaxBackground } from '../scripts/parallax/DownwardParallaxBackground';
 import {
-  MAIN_CAMERA_SHAKE_ON_TRAIN_HIT,
   MAIN_COAL_PICKUP,
+  MAIN_COAL_RECHARGE_STATION,
+  MAIN_GOLDEN_GOOSE,
   MAIN_PARALLAX_LAYERS,
   MAIN_PLAYER_SPAWN_OFFSET,
   MAIN_PLAYER_VISUAL,
   MAIN_TRAIN_COAL,
   MAIN_TRAIN_FLEET,
   MAIN_TRAIN_SPAWN,
+  MAIN_ENGINE_SMOKE_DEPTH,
   MAIN_TURRET_SYSTEM,
   MAIN_WEAPON_VISUAL_DEPTH,
   MAIN_WORLD,
 } from '../scripts/game/gameConfig';
 import { CoalPickupManager } from '../scripts/pickups/CoalPickupManager';
+import { CoalRechargeStationManager } from '../scripts/pickups/CoalRechargeStationManager';
+import { GoldenGoosePickupManager } from '../scripts/pickups/GoldenGoosePickupManager';
 import { PlayerController } from '../scripts/player/PlayerController';
 import { TrainController } from '../scripts/train/TrainController';
 import { TrainRidingController } from '../scripts/train/TrainRidingController';
 import { TrainTurretSystem, type WeaponType } from '../scripts/train/TrainTurretSystem';
 import { GameplayHud } from '../scripts/ui/GameplayHud';
+import { VirtualJoystick } from '../scripts/ui/VirtualJoystick';
+import {
+  ensureGoldenGooseWalkAnimations,
+  ensureSlowDomeShieldAnimation,
+} from '../scripts/assets/registerAssets';
+import { playCollision02ExplosionFx } from '../scripts/vfx/CollisionImpactVfx';
 import { createGreySmokeVfx } from '../scripts/vfx/SmokeVfx';
 
 /**
@@ -38,12 +48,44 @@ export class MainScene extends Phaser.Scene {
   private turrets?: TrainTurretSystem;
   private waves?: WaveSystem;
   private coalPickups?: CoalPickupManager;
+  private coalRechargeStations?: CoalRechargeStationManager;
+  private goldenGoose?: GoldenGoosePickupManager;
   private hud?: GameplayHud;
   private engineSmoke?: Phaser.GameObjects.Particles.ParticleEmitter;
   private draft?: CardDraftSystem;
   private placementPrompt?: Phaser.GameObjects.Text;
   private pendingPlacementWeapon?: WeaponType;
-  private introCutsceneActive = true;
+  private introCutsceneActive = false;
+  /** Title screen: same world/parallax/train as gameplay, no dialogue yet. */
+  private mainMenuActive = false;
+  /** Main menu widgets (title + hit-target buttons + info panel); avoids Container+Text input bugs. */
+  private menuPanel?: {
+    titles: Phaser.GameObjects.Container;
+    startBg: Phaser.GameObjects.Rectangle;
+    startTxt: Phaser.GameObjects.Text;
+    startDecor: Phaser.GameObjects.Rectangle[];
+    controlsBg: Phaser.GameObjects.Rectangle;
+    controlsTxt: Phaser.GameObjects.Text;
+    controlsDecor: Phaser.GameObjects.Rectangle[];
+    infoRoot: Phaser.GameObjects.Container;
+    scrollMask: Phaser.GameObjects.Graphics;
+    scrollInner: Phaser.GameObjects.Container;
+    scrollContent: Phaser.GameObjects.Container;
+    clipH: number;
+    thumb: Phaser.GameObjects.Rectangle;
+    trackLeft: number;
+    trackTop: number;
+    trackH: number;
+    backBg: Phaser.GameObjects.Rectangle;
+    backTxt: Phaser.GameObjects.Text;
+  };
+  private menuScrollY = 0;
+  private menuScrollMax = 0;
+  private menuInfoOpen = false;
+  private menuThumbDragging = false;
+  private menuLastPointerY = 0;
+  private menuInputCleanup?: () => void;
+  private menuStartCommitted = false;
   private introDialogueIndex = 0;
   private introBubble?: Phaser.GameObjects.Container;
   private introBubbleText?: Phaser.GameObjects.Text;
@@ -56,11 +98,22 @@ export class MainScene extends Phaser.Scene {
   private keyEsc?: Phaser.Input.Keyboard.Key;
   private keyAccelerate?: Phaser.Input.Keyboard.Key;
   private keyBrake?: Phaser.Input.Keyboard.Key;
+  /** Phone/tablet browsers (Phaser OS flag); enables touch stick + Board chip. */
+  private isMobileTouchLayout = false;
+  private virtualJoystick?: VirtualJoystick;
+  private mobileRideRoot?: Phaser.GameObjects.Container;
   private wasPointerDown = false;
-  private nextTrainHitShakeAt = 0;
   private nightTint?: Phaser.GameObjects.Rectangle;
-  private trainNightLight?: Phaser.GameObjects.Image;
+  private trainHeadlightL?: Phaser.GameObjects.Image;
+  private trainHeadlightR?: Phaser.GameObjects.Image;
   private playerNightLight?: Phaser.GameObjects.Image;
+  private trainIdleWarningBanner?: Phaser.GameObjects.Container;
+  /** Run stats: timer starts when intro dialogue ends. */
+  private runStartedAtMs: number | null = null;
+  /** Distance the train has traveled (world scroll) after the intro; feeds score. */
+  private trainTravelPx = 0;
+  private killScore = 0;
+  private gooseScore = 0;
   private railSegments: Phaser.GameObjects.Image[] = [];
   private gateTopSprites: Phaser.GameObjects.Image[] = [];
   private gateBottomSprites: Phaser.GameObjects.Image[] = [];
@@ -105,13 +158,40 @@ export class MainScene extends Phaser.Scene {
   private currentExp = 0;
   private expectedExp = 1500;
   private draftCount = 0;
+  /** Cinematic train death: Collision 02 bursts, remove train, then You Died UI. */
+  private trainDeathSequenceActive = false;
+  private youDiedOverlay?: Phaser.GameObjects.Container;
+  /** World scroll while riding with the train moving (for idle-train penalty between batches). */
+  private trainProgressThisSegmentPx = 0;
+  private static readonly TRAIN_IDLE_PROGRESS_THRESHOLD_PX = 100;
+  private static readonly TRAIN_IDLE_MIN_SPEED = 5;
 
   constructor() {
     super('MainScene');
   }
 
+  private static killScoreForEnemyType(type: EnemyType): number {
+    switch (type) {
+      case 'bomb':
+        return 10;
+      case 'chunky':
+        return 30;
+      case 'long_range':
+        return 20;
+      case 'basic':
+        return 5;
+    }
+  }
+
+  /** Train cruise + parallax scroll + paused waves while menu or intro dialogue runs. */
+  private inOpeningAtmosphere(): boolean {
+    return this.mainMenuActive || this.introCutsceneActive;
+  }
+
   create(): void {
     this.cameras.main.fadeIn(300, 0, 0, 0);
+    ensureSlowDomeShieldAnimation(this);
+    ensureGoldenGooseWalkAnimations(this);
     this.parallax = new DownwardParallaxBackground(this, {
       depth: -1000,
       layers: MAIN_PARALLAX_LAYERS,
@@ -132,12 +212,15 @@ export class MainScene extends Phaser.Scene {
       .setOrigin(0, 0)
       .setScrollFactor(0)
       .setDepth(6800);
-    this.trainNightLight = this.add
-      .image(-9999, -9999, 'night_light_stamp')
-      .setBlendMode(Phaser.BlendModes.ADD)
-      .setAlpha(0)
-      .setScrollFactor(1)
-      .setDepth(6801);
+    const headlight = () =>
+      this.add
+        .image(-9999, -9999, 'night_light_stamp')
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setAlpha(0)
+        .setScrollFactor(1)
+        .setDepth(6801);
+    this.trainHeadlightL = headlight();
+    this.trainHeadlightR = headlight();
     this.playerNightLight = this.add
       .image(-9999, -9999, 'night_light_stamp')
       .setBlendMode(Phaser.BlendModes.ADD)
@@ -213,17 +296,19 @@ export class MainScene extends Phaser.Scene {
     const keyRide = this.input.keyboard?.addKey(
       Phaser.Input.Keyboard.KeyCodes.E,
     );
-    if (!keyRide) {
-      throw new Error('MainScene requires keyboard input');
-    }
 
-    this.riding = new TrainRidingController(train, player, keyRide);
+    this.riding = new TrainRidingController(train, player, keyRide ?? undefined);
     this.riding.setRiding(true);
     this.keyEsc = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.keyAccelerate = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.W);
     this.keyBrake = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.S);
 
     this.coalPickups = new CoalPickupManager(this, MAIN_COAL_PICKUP);
+    this.coalRechargeStations = new CoalRechargeStationManager(this, MAIN_COAL_RECHARGE_STATION);
+    this.goldenGoose = new GoldenGoosePickupManager(this, MAIN_GOLDEN_GOOSE);
+
+    this.hud = new GameplayHud(this);
+    this.hud.setVisible(false);
 
     this.waves = new WaveSystem(
       this,
@@ -241,14 +326,32 @@ export class MainScene extends Phaser.Scene {
         onWaveCompleted: (waveNumber) => {
           this.hud?.onWaveCompleted(waveNumber);
         },
-        onEnemyDestroyed: (x, y, type) => {
-          this.coalPickups?.spawn(x, y, 6);
+        onEnemyDestroyed: (x, y, type, source) => {
+          const baseCoal = source?.trainRam ? 12 : 6;
+          const coal = this.scaledCoalDropFromBase(baseCoal);
+          this.coalPickups?.spawn(x, y, coal);
+          if (this.runStartedAtMs != null) {
+            this.killScore += MainScene.killScoreForEnemyType(type);
+          }
           const gained = this.rollExpDrop(type);
           this.gainExperience(gained);
           this.showExpGainText(x, y, gained);
         },
         onEnemyDespawned: () => {
           // Enemy went off-screen and is being respawned
+        },
+        onEndlessBatchEnqueued: (batchIndex) => {
+          if (batchIndex >= 2) {
+            if (
+              this.trainProgressThisSegmentPx < MainScene.TRAIN_IDLE_PROGRESS_THRESHOLD_PX
+            ) {
+              this.showTrainLazyDetectedWarning();
+              this.waves?.applyTrainIdlePressure();
+            } else {
+              this.waves?.decayTrainIdlePressure();
+            }
+          }
+          this.trainProgressThisSegmentPx = 0;
         },
       },
       1.04, // difficultyMultiplier
@@ -262,27 +365,78 @@ export class MainScene extends Phaser.Scene {
       depth: MAIN_WEAPON_VISUAL_DEPTH,
     });
     this.turrets.rebuildFromTrain(train);
+    const engineSpr = train.getEngineSprite();
     this.engineSmoke = createGreySmokeVfx(this, {
-      x: train.body.x,
-      y: train.body.y,
-      depth: MAIN_TRAIN_SPAWN.depth + 80,
-      alpha: 0.85,
-      follow: train.body,
+      x: engineSpr.x,
+      y: engineSpr.y,
+      depth: MAIN_ENGINE_SMOKE_DEPTH,
+      alpha: 1,
+      follow: engineSpr,
       followOffsetX: 0,
-      followOffsetY: -train.body.height * 0.42,
+      followOffsetY: -engineSpr.displayHeight * 0.5,
     });
 
-    this.hud = new GameplayHud(this);
-    this.hud.setVisible(false);
     train.setCoalConsumptionEnabled(false);
-    this.showIntroDialogue();
+    const menuBoot =
+      (this.sys.settings.data as { mainMenu?: boolean } | undefined)?.mainMenu === true;
+    if (menuBoot) {
+      this.mainMenuActive = true;
+      this.introCutsceneActive = false;
+      this.scheduleMainMenuOverlay();
+    } else {
+      this.introCutsceneActive = true;
+      this.showIntroDialogue();
+    }
     this.draft = new CardDraftSystem(this, {
       canChooseCard: (card) => this.canChooseCard(card),
       onChosen: ({ card }) => this.applyChosenCard(card),
       onStartPlacement: (weaponType) => this.tryStartWeaponPlacement(weaponType),
+      onWeaponSlotResolution: (mode, weaponType) =>
+        this.resolveWeaponSlotChoice(mode, weaponType),
     });
 
+    this.isMobileTouchLayout = !this.sys.game.device.os.desktop;
+    if (this.isMobileTouchLayout) {
+      this.virtualJoystick = new VirtualJoystick(this);
+      const w = this.scale.width;
+      const h = this.scale.height;
+      const rx = w - 86;
+      const ry = h - 58;
+      const woodFill = 0x2c1810;
+      const woodHover = 0x3d2817;
+      const brass = 0xc9a227;
+      const rideBg = this.add
+        .rectangle(rx, ry, 118, 48, woodFill, 1)
+        .setStrokeStyle(3, brass, 1)
+        .setScrollFactor(0)
+        .setDepth(7600)
+        .setInteractive({ useHandCursor: true });
+      const rideTxt = this.add
+        .text(rx, ry, 'Board', {
+          fontFamily: 'Finger Paint, system-ui, Segoe UI, Roboto, sans-serif',
+          fontSize: '22px',
+          color: '#f5e6c8',
+        })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(7601);
+      rideBg.on('pointerover', () => rideBg.setFillStyle(woodHover));
+      rideBg.on('pointerout', () => rideBg.setFillStyle(woodFill));
+      rideBg.on('pointerup', () => this.riding?.queueRideToggle());
+      this.mobileRideRoot = this.add
+        .container(0, 0, [rideBg, rideTxt])
+        .setScrollFactor(0)
+        .setDepth(7600)
+        .setVisible(false);
+    }
+
     this.events.once('shutdown', () => {
+      this.menuInputCleanup?.();
+      this.menuInputCleanup = undefined;
+      this.virtualJoystick?.destroy();
+      this.virtualJoystick = undefined;
+      this.mobileRideRoot?.destroy();
+      this.mobileRideRoot = undefined;
       this.engineSmoke?.stop();
       this.engineSmoke?.destroy();
       this.engineSmoke = undefined;
@@ -291,21 +445,46 @@ export class MainScene extends Phaser.Scene {
       this.placementPrompt = undefined;
       this.introAutoTimer?.destroy();
       this.introTypeTimer?.destroy();
-      this.nightTint?.destroy();
-      this.trainNightLight?.destroy();
-      this.playerNightLight?.destroy();
+      this.hud?.destroy();
+      this.hud = undefined;
+      this.waves?.destroy();
+      this.waves = undefined;
+      this.coalPickups?.destroy();
+      this.coalPickups = undefined;
+      this.coalRechargeStations?.destroy();
+      this.coalRechargeStations = undefined;
+      this.goldenGoose?.destroy();
+      this.goldenGoose = undefined;
+      this.turrets?.destroy();
+      this.turrets = undefined;
+      this.train?.destroy();
+      this.train = undefined;
+      this.player?.destroy();
+      this.player = undefined;
+      this.parallax?.destroy();
+      this.parallax = undefined;
+      this.riding = undefined;
+    this.nightTint?.destroy();
+    this.trainHeadlightL?.destroy();
+    this.trainHeadlightR?.destroy();
+    this.playerNightLight?.destroy();
+    this.trainIdleWarningBanner?.destroy(true);
+    this.trainIdleWarningBanner = undefined;
       this.gateTopSprites.forEach((g) => g.destroy());
       this.gateBottomSprites.forEach((g) => g.destroy());
       this.gateBlockers.forEach((g) => g.destroy());
+      this.youDiedOverlay?.destroy(true);
+      this.youDiedOverlay = undefined;
     });
   }
 
   private renderNightLighting(nightStrength: number, ridingNow: boolean): void {
     const tint = this.nightTint;
-    const trainLight = this.trainNightLight;
+    const hlL = this.trainHeadlightL;
+    const hlR = this.trainHeadlightR;
     const playerLight = this.playerNightLight;
     const train = this.train;
-    if (!tint || !trainLight || !playerLight || !train) return;
+    if (!tint || !hlL || !hlR || !playerLight || !train) return;
     const darkness = 0.58 * Phaser.Math.Clamp(nightStrength, 0, 1);
     const lightStrength = Phaser.Math.Clamp(
       (nightStrength - this.nightLightStartThreshold) /
@@ -315,37 +494,28 @@ export class MainScene extends Phaser.Scene {
     );
     tint.setFillStyle(0x05070d, darkness);
     if (darkness <= 0.001) {
-      trainLight.setAlpha(0);
+      hlL.setAlpha(0);
+      hlR.setAlpha(0);
       playerLight.setAlpha(0);
       return;
     }
 
-    // Train light: ellipse from full fleet bounds (engine + all carriages).
-    const hulls = train.getHullRects();
-    let minX = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
-    for (const h of hulls) {
-      const l = h.x - h.width * 0.5;
-      const r = h.x + h.width * 0.5;
-      const t = h.y - h.height * 0.5;
-      const b = h.y + h.height * 0.5;
-      minX = Math.min(minX, l);
-      maxX = Math.max(maxX, r);
-      minY = Math.min(minY, t);
-      maxY = Math.max(maxY, b);
-    }
-    const fleetCenterX = (minX + maxX) * 0.5;
-    const fleetCenterY = (minY + maxY) * 0.5;
-    const fleetWidth = Math.max(1, maxX - minX);
-    const fleetHeight = Math.max(1, maxY - minY);
-    trainLight.setPosition(fleetCenterX, fleetCenterY);
+    // Engine headlights: left/right "shoulders" ahead of center (sprite fronts upward).
+    const eng = train.getEngineSprite();
+    const ew = eng.displayWidth;
+    const eh = eng.displayHeight;
+    const side = ew * 0.26;
+    const forward = eh * 0.4;
+    hlL.setPosition(eng.x - side, eng.y - forward);
+    hlR.setPosition(eng.x + side, eng.y - forward);
     const stampSize = 256;
-    const trainLightW = fleetWidth * 1.34;
-    const trainLightH = fleetHeight * 1.24;
-    trainLight.setScale(trainLightW / stampSize, trainLightH / stampSize);
-    trainLight.setAlpha(0.33 * lightStrength);
+    const beam = Math.min(ew * 0.62, 155);
+    const s = beam / stampSize;
+    hlL.setScale(s, s);
+    hlR.setScale(s, s);
+    const headAlpha = 0.4 * lightStrength;
+    hlL.setAlpha(headAlpha);
+    hlR.setAlpha(headAlpha);
 
     // On-foot light: circular lamp around player.
     const player = this.player?.sprite;
@@ -360,17 +530,79 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
+  /** +50% coal per player level above 1 (Lv1 ×1, Lv2 ×1.5, Lv3 ×2, …). */
+  private scaledCoalDropFromBase(base: number): number {
+    const lv = Math.max(1, this.playerLevel);
+    const mul = 1 + 0.5 * (lv - 1);
+    return Math.max(1, Math.round(base * mul));
+  }
+
+  /** Son warns Dad when the idle-train penalty triggers (same bubble style as intro). */
+  private showTrainLazyDetectedWarning(): void {
+    this.trainIdleWarningBanner?.destroy(true);
+    this.trainIdleWarningBanner = undefined;
+
+    const { width, height } = this.scale;
+    const bubbleWidth = 680;
+    const bubbleHeight = 170;
+    const bubbleX = width - bubbleWidth - width * 0.08;
+    const bubbleY = height - bubbleHeight - 36;
+    const msg =
+      'Dad… they picked us up. We were too lazy to keep the train rolling — they know we stalled. They\'re vectoring a whole swarm right onto our pinpointed spot.';
+
+    const { container: c, content } = this.createSpeechBubble(
+      bubbleX,
+      bubbleY,
+      bubbleWidth,
+      bubbleHeight,
+      'Son',
+    );
+    content.setText(msg);
+    c.setScrollFactor(0).setDepth(8200);
+    c.setAlpha(0);
+    this.trainIdleWarningBanner = c;
+
+    this.tweens.add({
+      targets: c,
+      alpha: 1,
+      duration: 320,
+      ease: 'Sine.Out',
+    });
+    this.time.delayedCall(7200, () => {
+      if (!this.trainIdleWarningBanner || this.trainIdleWarningBanner !== c) return;
+      this.tweens.add({
+        targets: c,
+        alpha: 0,
+        duration: 420,
+        ease: 'Sine.In',
+        onComplete: () => {
+          c.destroy(true);
+          if (this.trainIdleWarningBanner === c) {
+            this.trainIdleWarningBanner = undefined;
+          }
+        },
+      });
+    });
+  }
+
   private rollExpDrop(type: EnemyType): number {
+    const levelBonus = Math.pow(1.01, Math.max(0, this.playerLevel - 1));
+    let base: number;
     switch (type) {
       case 'basic':
-        return Phaser.Math.Between(20, 25);
+        base = Phaser.Math.Between(20, 25);
+        break;
       case 'bomb':
-        return Phaser.Math.Between(30, 35);
+        base = Phaser.Math.Between(30, 35);
+        break;
       case 'chunky':
-        return Phaser.Math.Between(50, 55);
+        base = Phaser.Math.Between(50, 55);
+        break;
       case 'long_range':
-        return Phaser.Math.Between(28, 33);
+        base = Phaser.Math.Between(28, 33);
+        break;
     }
+    return Math.round(base * levelBonus);
   }
 
   private gainExperience(amount: number): void {
@@ -426,13 +658,59 @@ export class MainScene extends Phaser.Scene {
     });
   }
 
+  private showGooseScorePopup(x: number, y: number, amount: number): void {
+    const t = this.add
+      .text(x, y - 18, `+${Math.floor(amount)} GOLD GOOSE`, {
+        fontFamily: 'Finger Paint, system-ui, Segoe UI, Roboto, sans-serif',
+        fontSize: '19px',
+        color: '#facc22',
+        stroke: '#3d2808',
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5)
+      .setDepth(9000);
+    this.tweens.add({
+      targets: t,
+      y: y - 56,
+      alpha: 0,
+      duration: 1000,
+      ease: 'Sine.Out',
+      onComplete: () => t.destroy(),
+    });
+  }
+
   private computeNightStrength(): number {
-    this.dayNightCycleMs += this.game.loop.delta;
+    if (!this.inOpeningAtmosphere()) {
+      this.dayNightCycleMs += this.game.loop.delta;
+    }
     const phase =
       ((this.dayNightCycleMs % this.dayNightCycleDurationMs) / this.dayNightCycleDurationMs) *
       Math.PI *
       2;
     return (1 - Math.cos(phase)) * 0.5;
+  }
+
+  private showCoalRechargeDadBubble(): void {
+    const text =
+      'Turns out the old coal mine never got the memo about the robot uprising—still sitting there full of lumps. Dumb rocks, one; fancy smart AI, zero. Free refills. I will take it.';
+    const bubble = this.createSpeechBubble(54, this.scale.height - 236, 730, 172, 'Dad');
+    bubble.content.setText(text);
+    const c = bubble.container.setScrollFactor(0).setDepth(7040).setAlpha(0);
+    this.tweens.add({
+      targets: c,
+      alpha: 1,
+      duration: 260,
+      ease: 'Sine.Out',
+    });
+    this.time.delayedCall(6800, () => {
+      this.tweens.add({
+        targets: c,
+        alpha: 0,
+        duration: 420,
+        ease: 'Sine.In',
+        onComplete: () => c.destroy(),
+      });
+    });
   }
 
   private showNightWarningBubble(): void {
@@ -474,10 +752,19 @@ export class MainScene extends Phaser.Scene {
   }
 
   private startCardDraft(): void {
-    if (this.introCutsceneActive || !this.draft) return;
+    if (this.inOpeningAtmosphere() || !this.draft) return;
     const offers = this.rollCardOffers();
+    this.applyWeaponStatBlurbsToOffers(offers);
     this.draft.open(offers);
     this.draftCount += 1;
+  }
+
+  private applyWeaponStatBlurbsToOffers(offers: CardOffer[]): void {
+    if (!this.turrets) return;
+    for (const c of offers) {
+      if (c.kind !== 'weapon' || !c.weaponType || c.placementChoice) continue;
+      c.description = `${c.description}\n\n${this.turrets.getWeaponCardDraftBlurb(c.weaponType)}`;
+    }
   }
 
   private rollCardOffers(): CardOffer[] {
@@ -643,6 +930,12 @@ export class MainScene extends Phaser.Scene {
   }
 
   private canChooseCard(card: CardOffer): boolean {
+    if (card.placementChoice === 'add') {
+      return !!this.turrets?.hasFreeSlot();
+    }
+    if (card.placementChoice === 'upgrade') {
+      return !!card.weaponType && !!this.turrets?.hasWeaponType(card.weaponType);
+    }
     if (card.kind !== 'weapon' || !card.weaponType || !this.turrets) return true;
     return (
       this.turrets.hasWeaponType(card.weaponType) || this.turrets.hasFreeSlot()
@@ -698,12 +991,51 @@ export class MainScene extends Phaser.Scene {
 
   private tryStartWeaponPlacement(type: WeaponType): void {
     if (!this.turrets || !this.train) return;
-    if (this.turrets.upgradeMatchingWeapon(type)) {
-      return;
-    }
     if (!this.turrets.hasFreeSlot()) {
+      this.turrets.upgradeMatchingWeapon(type);
       return;
     }
+    if (this.turrets.hasWeaponType(type)) {
+      this.time.delayedCall(0, () => this.openWeaponAddOrUpgradeChoice(type));
+      return;
+    }
+    this.beginWeaponPlacement(type);
+  }
+
+  private resolveWeaponSlotChoice(mode: 'add' | 'upgrade', type: WeaponType): void {
+    if (!this.turrets) return;
+    if (mode === 'upgrade') {
+      this.turrets.upgradeMatchingWeapon(type);
+      return;
+    }
+    this.beginWeaponPlacement(type);
+  }
+
+  private openWeaponAddOrUpgradeChoice(type: WeaponType): void {
+    if (!this.draft || this.inOpeningAtmosphere()) return;
+    const addStats = this.turrets?.getWeaponAddSlotChoiceBlurb(type) ?? '';
+    const upStats = this.turrets?.getWeaponUpgradeChoiceBlurb(type) ?? '';
+    this.draft.open([
+      {
+        id: 'weapon-slot-add',
+        label: 'Add to slot',
+        description: `Place a new Lv1 mount on a free slot, then tap the train.\n\n${addStats}`,
+        kind: 'weapon',
+        weaponType: type,
+        placementChoice: 'add',
+      },
+      {
+        id: 'weapon-slot-upgrade',
+        label: 'Upgrade existing',
+        description: `Level up the first slotted copy of this weapon (same type).\n\n${upStats}`,
+        kind: 'weapon',
+        weaponType: type,
+        placementChoice: 'upgrade',
+      },
+    ]);
+  }
+
+  private beginWeaponPlacement(type: WeaponType): void {
     this.pendingPlacementWeapon = type;
     this.placementPrompt?.destroy();
     this.placementPrompt = this.add
@@ -722,6 +1054,789 @@ export class MainScene extends Phaser.Scene {
       .setOrigin(0.5, 0)
       .setScrollFactor(0)
       .setDepth(8100);
+  }
+
+  private startTrainDeathSequence(): void {
+    if (this.trainDeathSequenceActive) return;
+    const train = this.train;
+    if (!train) return;
+
+    this.trainDeathSequenceActive = true;
+    this.draft?.close();
+    this.placementPrompt?.destroy();
+    this.placementPrompt = undefined;
+    this.pendingPlacementWeapon = undefined;
+    this.waves?.setSpawningPaused(true);
+    this.hud?.setVisible(false);
+
+    const hulls = train.getHullRects();
+    const pts: Phaser.Math.Vector2[] = [];
+    for (const h of hulls) {
+      pts.push(new Phaser.Math.Vector2(h.x, h.y));
+      pts.push(new Phaser.Math.Vector2(h.x - h.width * 0.22, h.y + h.height * 0.1));
+      pts.push(new Phaser.Math.Vector2(h.x + h.width * 0.22, h.y + h.height * 0.1));
+    }
+    for (const t of train.getTurretWorldPositions()) {
+      pts.push(new Phaser.Math.Vector2(t.x, t.y));
+    }
+    const capped = pts.slice(0, 11);
+    const staggerMs = 88;
+    const msPerFrame = 42;
+    const frameCount = 6;
+    let maxEnd = 0;
+    capped.forEach((p, i) => {
+      const start = i * staggerMs;
+      this.time.delayedCall(start, () => {
+        playCollision02ExplosionFx(this, p.x, p.y, {
+          depth: 46,
+          displayWidth: Phaser.Math.Between(148, 205),
+          msPerFrame,
+        });
+      });
+      maxEnd = Math.max(maxEnd, start + frameCount * msPerFrame + 50);
+    });
+
+    this.time.delayedCall(maxEnd + 200, () => this.finishTrainExplosionAndShowYouDied());
+  }
+
+  private finishTrainExplosionAndShowYouDied(): void {
+    const train = this.train;
+    if (train) {
+      const cx = train.body.x;
+      const cy = train.body.y;
+      this.cameras.main.stopFollow();
+      this.cameras.main.centerOn(cx, cy);
+    }
+
+    this.engineSmoke?.stop();
+    this.engineSmoke?.destroy();
+    this.engineSmoke = undefined;
+
+    this.turrets?.destroy();
+    this.turrets = undefined;
+
+    this.player?.sprite.setVisible(false);
+
+    this.train?.destroy();
+    this.train = undefined;
+
+    this.time.delayedCall(140, () => this.showYouDiedOverlay());
+  }
+
+  private showYouDiedOverlay(): void {
+    if (this.youDiedOverlay) return;
+    this.waves?.explodeLivingEnemiesOnCameraWithCollision02();
+    const { width, height } = this.scale;
+    const cx = width * 0.5;
+    const z = 12500;
+
+    const dim = this.add
+      .rectangle(cx, height * 0.5, width + 8, height + 8, 0x000000, 0)
+      .setScrollFactor(0)
+      .setDepth(z);
+
+    const band = this.add
+      .rectangle(cx, height * 0.395, width * 0.96, 132, 0x050305, 0)
+      .setScrollFactor(0)
+      .setDepth(z + 1)
+      .setStrokeStyle(1, 0x221418, 0.4);
+
+    const elapsedMs =
+      this.runStartedAtMs != null ? Math.max(0, this.time.now - this.runStartedAtMs) : 0;
+    const mm = Math.floor(elapsedMs / 60000);
+    const ss = Math.floor((elapsedMs % 60000) / 1000);
+    const timeStr = `${mm}:${ss.toString().padStart(2, '0')}`;
+    const totalScore =
+      Math.floor(this.trainTravelPx) + this.killScore + this.gooseScore;
+
+    const runStats = this.add
+      .text(
+        cx,
+        height * 0.248,
+        `Score ${totalScore}\nTime survived ${timeStr}\n(${Math.floor(this.trainTravelPx)} train + ${this.killScore} kills + ${this.gooseScore} goose)`,
+        {
+          fontFamily: 'Finger Paint, system-ui, Segoe UI, Roboto, sans-serif',
+          fontSize: '17px',
+          color: '#e8e4dc',
+          align: 'center',
+          lineSpacing: 4,
+        },
+      )
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(z + 2)
+      .setAlpha(0);
+
+    const title = this.add
+      .text(cx, height * 0.382, 'YOU DIED', {
+        fontFamily: 'Nosifer, Crimson Text, Georgia, serif',
+        fontSize: '56px',
+        color: '#7a141c',
+        align: 'center',
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(z + 3)
+      .setAlpha(0);
+    title.setStroke('#100205', 6);
+    title.setShadow(0, 5, '#000000', 10, true, true);
+
+    const subtitle = this.add
+      .text(cx, height * 0.475, 'The train has fallen.', {
+        fontFamily: 'Finger Paint, system-ui, Segoe UI, Roboto, sans-serif',
+        fontSize: '20px',
+        color: '#e8e8ec',
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(z + 2)
+      .setAlpha(0);
+
+    const btnW = 288;
+    const btnH = 48;
+    const woodFill = 0x2c1810;
+    const woodHover = 0x3d2817;
+    const brass = 0xc9a227;
+    const menuY = height * 0.62;
+    const depthBtns = z + 2;
+
+    const makeLocoDeathButton = (
+      y: number,
+      label: string,
+      onClick: () => void,
+    ): Phaser.GameObjects.GameObject[] => {
+      const bg = this.add
+        .rectangle(cx, y, btnW, btnH, woodFill, 1)
+        .setStrokeStyle(3, brass, 1)
+        .setScrollFactor(0)
+        .setDepth(depthBtns)
+        .setInteractive({ useHandCursor: true })
+        .setAlpha(0);
+      const rivetInset = btnW * 0.44;
+      const rivetSize = 7;
+      const rivet = this.add
+        .rectangle(cx - rivetInset, y, rivetSize, rivetSize, brass, 0.9)
+        .setScrollFactor(0)
+        .setDepth(depthBtns + 1)
+        .setAlpha(0);
+      const rivet2 = this.add
+        .rectangle(cx + rivetInset, y, rivetSize, rivetSize, brass, 0.9)
+        .setScrollFactor(0)
+        .setDepth(depthBtns + 1)
+        .setAlpha(0);
+      const txt = this.add
+        .text(cx, y, label, {
+          fontFamily:
+            'Finger Paint, system-ui, Segoe UI, Roboto, sans-serif',
+          fontSize: '28px',
+          color: '#f5e6c8',
+        })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(depthBtns + 2)
+        .setAlpha(0);
+      const fire = (): void => {
+        if (this.sys.settings.status !== Phaser.Scenes.RUNNING) return;
+        onClick();
+      };
+      bg.on('pointerup', fire);
+      bg.on('pointerover', () => {
+        bg.setFillStyle(woodHover);
+        rivet.setAlpha(1);
+        rivet2.setAlpha(1);
+      });
+      bg.on('pointerout', () => {
+        bg.setFillStyle(woodFill);
+        rivet.setAlpha(0.9);
+        rivet2.setAlpha(0.9);
+      });
+      return [bg, rivet, rivet2, txt];
+    };
+
+    const menuParts = makeLocoDeathButton(menuY, 'Main Menu', () => {
+      window.location.reload();
+    });
+
+    this.youDiedOverlay = this.add.container(0, 0, [
+      dim,
+      band,
+      runStats,
+      subtitle,
+      title,
+      ...menuParts,
+    ]);
+    this.youDiedOverlay.setScrollFactor(0);
+    this.youDiedOverlay.setDepth(z);
+
+    this.tweens.add({
+      targets: dim,
+      alpha: 0.7,
+      duration: 720,
+      ease: 'Sine.Out',
+    });
+    this.tweens.add({
+      targets: band,
+      alpha: 0.9,
+      duration: 680,
+      delay: 100,
+      ease: 'Sine.Out',
+    });
+    this.tweens.add({
+      targets: [runStats, title, subtitle, ...menuParts],
+      alpha: 1,
+      duration: 520,
+      delay: 260,
+      ease: 'Sine.Out',
+    });
+  }
+
+  /** Title UI over the live train + parallax; fades out to reveal the same scene and intro dialogue. */
+  private scheduleMainMenuOverlay(): void {
+    const build = (): void => {
+      if (!this.mainMenuActive) return;
+      const { width, height } = this.scale;
+      const cx = width * 0.5;
+      const cy = height * 0.5;
+      const depthTitles = 9500;
+      const depthBtns = 9510;
+      const depthInfo = 9525;
+
+      const title = this.add
+        .text(cx, height * 0.14, 'Choot Choot!', {
+          fontFamily: 'Nosifer, system-ui, Segoe UI, Roboto, sans-serif',
+          fontSize: '58px',
+          color: '#ff3434',
+          align: 'center',
+        })
+        .setOrigin(0.5)
+        .setShadow(2, 2, '#333333', 2, false, true)
+        .setScrollFactor(0)
+        .setDepth(depthTitles);
+
+      const subtitle = this.add
+        .text(cx, height * 0.26, 'The rails whisper... board if you dare.', {
+          fontFamily:
+            'Freckle Face, system-ui, Segoe UI, Roboto, sans-serif',
+          fontSize: '34px',
+          color: '#f0f6fc',
+          align: 'center',
+        })
+        .setOrigin(0.5)
+        .setShadow(2, 2, '#333333', 2, false, true)
+        .setScrollFactor(0)
+        .setDepth(depthTitles);
+
+      const titles = this.add.container(0, 0, [title, subtitle]).setScrollFactor(0).setDepth(depthTitles);
+
+      const btnW = 288;
+      const btnH = 48;
+      const woodFill = 0x2c1810;
+      const woodHover = 0x3d2817;
+      const brass = 0xc9a227;
+
+      const makeLocoButton = (
+        y: number,
+        label: string,
+        onClick: () => void,
+      ): {
+        bg: Phaser.GameObjects.Rectangle;
+        txt: Phaser.GameObjects.Text;
+        decor: Phaser.GameObjects.Rectangle[];
+      } => {
+        const bg = this.add
+          .rectangle(cx, y, btnW, btnH, woodFill, 1)
+          .setStrokeStyle(3, brass, 1)
+          .setScrollFactor(0)
+          .setDepth(depthBtns)
+          .setInteractive({ useHandCursor: true });
+        const rivet = this.add
+          .rectangle(cx - btnW * 0.38, y, 5, 5, brass, 0.85)
+          .setScrollFactor(0)
+          .setDepth(depthBtns + 1);
+        const rivet2 = this.add
+          .rectangle(cx + btnW * 0.38, y, 5, 5, brass, 0.85)
+          .setScrollFactor(0)
+          .setDepth(depthBtns + 1);
+        const txt = this.add
+          .text(cx, y, label, {
+            fontFamily:
+              'Finger Paint, system-ui, Segoe UI, Roboto, sans-serif',
+            fontSize: '28px',
+            color: '#f5e6c8',
+          })
+          .setOrigin(0.5)
+          .setScrollFactor(0)
+          .setDepth(depthBtns + 2);
+        const fire = (): void => {
+          if (!this.mainMenuActive || this.menuStartCommitted) return;
+          onClick();
+        };
+        bg.on('pointerup', fire);
+        bg.on('pointerover', () => {
+          bg.setFillStyle(woodHover);
+          rivet.setAlpha(1);
+          rivet2.setAlpha(1);
+        });
+        bg.on('pointerout', () => {
+          bg.setFillStyle(woodFill);
+          rivet.setAlpha(0.85);
+          rivet2.setAlpha(0.85);
+        });
+        return { bg, txt, decor: [rivet, rivet2] };
+      };
+
+      const startY = height * 0.72;
+      const controlsY = height * 0.825;
+      const startPair = makeLocoButton(startY, 'Start', () => this.commitMenuStart());
+      const controlsPair = makeLocoButton(controlsY, 'Controls & Info', () =>
+        this.openMenuInfoPanel(),
+      );
+
+      const shortIntro =
+        'Steam through hostile country: mind your coal, shoot the scrap, patch the train between waves.';
+
+      const kbBullets = `Move — WASD
+Board — E
+Throttle — W / S while you drive
+Click — Story, cards, place guns
+Esc — Skip intro`;
+
+      const mobileBullets = `Stick — Tap anywhere to spawn it; drag to move; lift to reset
+Cards — Stick sleeps while you pick; it wakes after
+Board — On-screen button (= E)
+Drive — Stick up / down for gas & brake`;
+
+      const panelW = width * 0.88;
+      const panelH = height * 0.82;
+      const margin = 18;
+      const scrollTrackW = 14;
+      const gap = 8;
+      const textColumnW = panelW - margin * 2 - scrollTrackW - gap;
+      const innerPad = 10;
+      const innerW = textColumnW - innerPad * 2;
+
+      const titleLineY = -panelH * 0.5 + margin;
+      const headerBlockH = 48;
+      const scrollTop = titleLineY + headerBlockH;
+      const backH = 46;
+      const backGap = 16;
+      const backY = panelH * 0.5 - margin - backH * 0.5;
+      const scrollBottom = backY - backH * 0.5 - backGap;
+      const scrollH = Math.max(100, scrollBottom - scrollTop);
+      const clipH = scrollH;
+
+      const clipX = -panelW * 0.5 + margin;
+      const clipY = scrollTop;
+
+      const infoRoot = this.add.container(cx, cy).setScrollFactor(0).setDepth(depthInfo).setVisible(false).setAlpha(0);
+
+      const panelBg = this.add
+        .rectangle(0, 0, panelW, panelH, 0x1a120c, 0.97)
+        .setStrokeStyle(4, brass, 0.95);
+      const panelRivet = (rx: number, ry: number): Phaser.GameObjects.Arc =>
+        this.add.circle(rx, ry, 4, brass, 0.75);
+      const rivets = [
+        panelRivet(-panelW * 0.46, -panelH * 0.46),
+        panelRivet(panelW * 0.46, -panelH * 0.46),
+        panelRivet(-panelW * 0.46, panelH * 0.46),
+        panelRivet(panelW * 0.46, panelH * 0.46),
+      ];
+
+      const headerOccluder = this.add
+        .rectangle(0, titleLineY + headerBlockH * 0.5 - 2, textColumnW + 24, headerBlockH + 10, 0x1a120c, 1)
+        .setOrigin(0.5, 0.5);
+
+      const panelTitle = this.add
+        .text(0, titleLineY, 'Controls & Info', {
+          fontFamily:
+            'Finger Paint, system-ui, Segoe UI, Roboto, sans-serif',
+          fontSize: '28px',
+          color: '#f5e6c8',
+        })
+        .setOrigin(0.5, 0);
+
+      const scrollMask = this.add.graphics({ x: 0, y: 0 });
+      scrollMask.fillStyle(0xffffff);
+      scrollMask.fillRect(clipX, clipY, textColumnW, scrollH);
+      scrollMask.setVisible(false);
+
+      const scrollInner = this.add.container(clipX, clipY);
+      const scrollContent = this.add.container(0, 0);
+      scrollInner.add(scrollContent);
+      scrollInner.setMask(scrollMask.createGeometryMask());
+
+      const bodyStyle: Phaser.Types.GameObjects.Text.TextStyle = {
+        fontFamily: 'system-ui, Segoe UI, Roboto, sans-serif',
+        fontSize: '15px',
+        color: '#e8dcc8',
+        wordWrap: { width: innerW },
+        lineSpacing: 5,
+        align: 'left',
+      };
+      const subStyle: Phaser.Types.GameObjects.Text.TextStyle = {
+        fontFamily: 'system-ui, Segoe UI, Roboto, sans-serif',
+        fontSize: '16px',
+        color: '#f5e6c8',
+        fontStyle: 'bold',
+        align: 'center',
+      };
+
+      let stackY = innerPad;
+      const subCenterX = innerPad + innerW * 0.5;
+
+      const introT = this.add.text(innerPad, stackY, shortIntro, bodyStyle).setOrigin(0, 0);
+      scrollContent.add(introT);
+      stackY += introT.height + 14;
+
+      const subKb = this.add
+        .text(subCenterX, stackY, 'Keyboard & mouse', subStyle)
+        .setOrigin(0.5, 0);
+      scrollContent.add(subKb);
+      stackY += subKb.height + 8;
+
+      const kbT = this.add.text(innerPad, stackY, kbBullets, bodyStyle).setOrigin(0, 0);
+      scrollContent.add(kbT);
+      stackY += kbT.height + 16;
+
+      const subMob = this.add
+        .text(subCenterX, stackY, 'Mobile controls', subStyle)
+        .setOrigin(0.5, 0);
+      scrollContent.add(subMob);
+      stackY += subMob.height + 8;
+
+      const mobT = this.add.text(innerPad, stackY, mobileBullets, bodyStyle).setOrigin(0, 0);
+      scrollContent.add(mobT);
+
+      const trackLeft = clipX + textColumnW + gap;
+      const trackTop = clipY;
+      const track = this.add
+        .rectangle(
+          trackLeft + scrollTrackW * 0.5,
+          trackTop + scrollH * 0.5,
+          scrollTrackW,
+          scrollH,
+          0x0d0906,
+          0.92,
+        )
+        .setStrokeStyle(1, brass, 0.55);
+      const thumb = this.add
+        .rectangle(trackLeft + 2, trackTop, scrollTrackW - 4, 36, brass, 0.92)
+        .setOrigin(0, 0)
+        .setInteractive({ useHandCursor: true });
+      thumb.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+        if (!this.menuInfoOpen) return;
+        this.menuThumbDragging = true;
+        this.menuLastPointerY = pointer.y;
+      });
+
+      const backBg = this.add
+        .rectangle(0, backY, 176, backH, woodFill, 1)
+        .setStrokeStyle(3, brass, 1)
+        .setInteractive({ useHandCursor: true });
+      const backTxt = this.add
+        .text(0, backY, 'Back', {
+          fontFamily:
+            'Finger Paint, system-ui, Segoe UI, Roboto, sans-serif',
+          fontSize: '26px',
+          color: '#f5e6c8',
+        })
+        .setOrigin(0.5);
+      const closeInfo = (): void => this.closeMenuInfoPanel();
+      backBg.on('pointerover', () => backBg.setFillStyle(woodHover));
+      backBg.on('pointerout', () => backBg.setFillStyle(woodFill));
+      backBg.on('pointerdown', closeInfo);
+      backBg.on('pointerup', closeInfo);
+
+      infoRoot.add([
+        panelBg,
+        headerOccluder,
+        panelTitle,
+        ...rivets,
+        scrollMask,
+        scrollInner,
+        track,
+        thumb,
+        backBg,
+        backTxt,
+      ]);
+      infoRoot.bringToTop(backTxt);
+
+      this.menuPanel = {
+        titles,
+        startBg: startPair.bg,
+        startTxt: startPair.txt,
+        startDecor: startPair.decor,
+        controlsBg: controlsPair.bg,
+        controlsTxt: controlsPair.txt,
+        controlsDecor: controlsPair.decor,
+        infoRoot,
+        scrollMask,
+        scrollInner,
+        scrollContent,
+        clipH,
+        thumb,
+        trackLeft,
+        trackTop,
+        trackH: scrollH,
+        backBg,
+        backTxt,
+      };
+
+      const onWheel = (
+        _pointer: Phaser.Input.Pointer,
+        _go: Phaser.GameObjects.GameObject,
+        _dx: number,
+        dy: number,
+      ): void => {
+        if (!this.menuInfoOpen) return;
+        this.applyMenuScrollDelta(dy * 0.12);
+      };
+
+      const onPointerMove = (pointer: Phaser.Input.Pointer): void => {
+        if (!this.menuThumbDragging || !this.menuPanel || !this.menuInfoOpen) return;
+        const dy = pointer.y - this.menuLastPointerY;
+        this.menuLastPointerY = pointer.y;
+        const m = this.menuPanel;
+        const thumbH = m.thumb.height;
+        const travel = Math.max(1, m.trackH - thumbH);
+        const deltaScroll = (dy / travel) * this.menuScrollMax;
+        this.applyMenuScrollDelta(deltaScroll);
+      };
+
+      const onPointerUp = (): void => {
+        this.menuThumbDragging = false;
+      };
+
+      this.input.on('wheel', onWheel);
+      this.input.on('pointermove', onPointerMove);
+      this.input.on('pointerup', onPointerUp);
+
+      this.menuInputCleanup = (): void => {
+        this.input.off('wheel', onWheel);
+        this.input.off('pointermove', onPointerMove);
+        this.input.off('pointerup', onPointerUp);
+      };
+
+      this.time.delayedCall(0, () => this.refreshMenuScrollMetrics());
+    };
+
+    const webFont = (window as { WebFont?: { load: (cfg: object) => void } })
+      .WebFont;
+    if (webFont) {
+      webFont.load({
+        google: {
+          families: ['Freckle Face', 'Finger Paint', 'Nosifer'],
+        },
+        active: build,
+      });
+    } else {
+      build();
+    }
+  }
+
+  private refreshMenuScrollMetrics(): void {
+    const m = this.menuPanel;
+    if (!m) return;
+    let contentBottom = 0;
+    for (const ch of m.scrollContent.list) {
+      if (ch instanceof Phaser.GameObjects.Text) {
+        contentBottom = Math.max(contentBottom, ch.y + ch.height);
+      }
+    }
+    const totalH = contentBottom + 10;
+    this.menuScrollMax = Math.max(0, totalH - m.clipH);
+    this.menuScrollY = Phaser.Math.Clamp(this.menuScrollY, 0, this.menuScrollMax);
+    m.scrollContent.setY(-this.menuScrollY);
+    this.layoutMenuScrollbarThumb();
+  }
+
+  private applyMenuScrollDelta(delta: number): void {
+    const m = this.menuPanel;
+    if (!m || !this.menuInfoOpen) return;
+    this.menuScrollY = Phaser.Math.Clamp(this.menuScrollY + delta, 0, this.menuScrollMax);
+    m.scrollContent.setY(-this.menuScrollY);
+    this.layoutMenuScrollbarThumb();
+  }
+
+  private layoutMenuScrollbarThumb(): void {
+    const m = this.menuPanel;
+    if (!m) return;
+    const { trackH, trackTop, thumb, trackLeft } = m;
+    const tMin = 24;
+    const totalContent = this.menuScrollMax + m.clipH;
+    const ratio = totalContent <= 0 ? 1 : m.clipH / totalContent;
+    const thumbH = Math.max(tMin, Math.floor(trackH * ratio));
+    thumb.setSize(thumb.width, thumbH);
+    const travel = Math.max(0, trackH - thumbH);
+    const yOff =
+      this.menuScrollMax <= 0 ? 0 : (this.menuScrollY / this.menuScrollMax) * travel;
+    thumb.setPosition(trackLeft + 2, trackTop + yOff);
+  }
+
+  private openMenuInfoPanel(): void {
+    const m = this.menuPanel;
+    if (!m || this.menuInfoOpen) return;
+    this.menuInfoOpen = true;
+    this.menuScrollY = 0;
+    this.refreshMenuScrollMetrics();
+    m.infoRoot.setVisible(true);
+    m.infoRoot.setAlpha(0);
+    this.tweens.add({
+      targets: [
+        m.startBg,
+        m.startTxt,
+        ...m.startDecor,
+        m.controlsBg,
+        m.controlsTxt,
+        ...m.controlsDecor,
+      ],
+      alpha: 0,
+      duration: 240,
+      ease: 'Sine.Out',
+      onComplete: () => {
+        m.startBg.disableInteractive();
+        m.controlsBg.disableInteractive();
+        [
+          m.startBg,
+          m.startTxt,
+          ...m.startDecor,
+          m.controlsBg,
+          m.controlsTxt,
+          ...m.controlsDecor,
+        ].forEach((o) => o.setVisible(false));
+      },
+    });
+    this.tweens.add({
+      targets: m.infoRoot,
+      alpha: 1,
+      duration: 300,
+      delay: 100,
+      ease: 'Sine.Out',
+    });
+  }
+
+  private closeMenuInfoPanel(animate = true): void {
+    const m = this.menuPanel;
+    if (!m || !this.menuInfoOpen) return;
+    this.menuInfoOpen = false;
+    this.menuThumbDragging = false;
+    const restoreButtons = (): void => {
+      [
+        m.startBg,
+        m.startTxt,
+        ...m.startDecor,
+        m.controlsBg,
+        m.controlsTxt,
+        ...m.controlsDecor,
+      ].forEach((o) => {
+        o.setVisible(true);
+        o.setAlpha(0);
+      });
+      m.startBg.setInteractive({ useHandCursor: true });
+      m.controlsBg.setInteractive({ useHandCursor: true });
+    };
+    if (!animate) {
+      m.infoRoot.setVisible(false);
+      m.infoRoot.setAlpha(0);
+      [
+        m.startBg,
+        m.startTxt,
+        ...m.startDecor,
+        m.controlsBg,
+        m.controlsTxt,
+        ...m.controlsDecor,
+      ].forEach((o) => {
+        o.setVisible(true);
+        o.setAlpha(1);
+      });
+      m.startBg.setInteractive({ useHandCursor: true });
+      m.controlsBg.setInteractive({ useHandCursor: true });
+      return;
+    }
+    this.tweens.add({
+      targets: m.infoRoot,
+      alpha: 0,
+      duration: 220,
+      ease: 'Sine.In',
+      onComplete: () => m.infoRoot.setVisible(false),
+    });
+    this.tweens.add({
+      targets: [
+        m.startBg,
+        m.startTxt,
+        ...m.startDecor,
+        m.controlsBg,
+        m.controlsTxt,
+        ...m.controlsDecor,
+      ],
+      alpha: 1,
+      duration: 260,
+      delay: 140,
+      ease: 'Sine.Out',
+      onStart: () => restoreButtons(),
+    });
+  }
+
+  private destroyMainMenuPanel(): void {
+    const m = this.menuPanel;
+    if (!m) return;
+    m.startDecor.forEach((o) => o.destroy());
+    m.controlsDecor.forEach((o) => o.destroy());
+    m.infoRoot.destroy();
+    m.titles.destroy();
+    m.startBg.destroy();
+    m.startTxt.destroy();
+    m.controlsBg.destroy();
+    m.controlsTxt.destroy();
+    this.menuPanel = undefined;
+    this.menuScrollY = 0;
+    this.menuScrollMax = 0;
+    this.menuInfoOpen = false;
+    this.menuThumbDragging = false;
+  }
+
+  private commitMenuStart(): void {
+    if (!this.mainMenuActive || this.menuStartCommitted) return;
+    if (this.menuInfoOpen) return;
+    this.menuStartCommitted = true;
+    const m = this.menuPanel;
+    const targets: Phaser.GameObjects.GameObject[] = [];
+    if (m) {
+      targets.push(
+        m.titles,
+        m.startBg,
+        m.startTxt,
+        ...m.startDecor,
+        m.controlsBg,
+        m.controlsTxt,
+        ...m.controlsDecor,
+        m.infoRoot,
+      );
+    }
+    const finish = (): void => {
+      this.menuInputCleanup?.();
+      this.menuInputCleanup = undefined;
+      this.destroyMainMenuPanel();
+      this.beginIntroFromMenu();
+    };
+    if (targets.length === 0) {
+      finish();
+      return;
+    }
+    this.tweens.add({
+      targets,
+      alpha: 0,
+      duration: 520,
+      ease: 'Sine.InOut',
+      onComplete: finish,
+    });
+  }
+
+  private beginIntroFromMenu(): void {
+    this.mainMenuActive = false;
+    this.introDialogueIndex = 0;
+    this.introCutsceneActive = true;
+    this.showIntroDialogue();
   }
 
   private showIntroDialogue(): void {
@@ -893,6 +2008,10 @@ export class MainScene extends Phaser.Scene {
     this.introHintText = undefined;
     this.train?.setCoalConsumptionEnabled(true);
     this.hud?.setVisible(true);
+    this.runStartedAtMs = this.time.now;
+    this.trainTravelPx = 0;
+    this.killScore = 0;
+    this.gooseScore = 0;
   }
 
   /**
@@ -934,18 +2053,33 @@ export class MainScene extends Phaser.Scene {
       this.introPointerWasDown = false;
     }
     if (this.keyEsc && Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
-      this.finishIntroCutscene();
+      if (this.mainMenuActive && this.menuInfoOpen) {
+        this.closeMenuInfoPanel();
+      } else if (!this.mainMenuActive && this.introCutsceneActive) {
+        this.finishIntroCutscene();
+      }
     }
 
-    if (!this.introCutsceneActive && !this.draft?.isActive() && !this.pendingPlacementWeapon) {
+    if (!this.inOpeningAtmosphere() && !this.draft?.isActive() && !this.pendingPlacementWeapon) {
       this.riding?.processMountInput();
     }
 
     const gameplayLocked =
-      this.introCutsceneActive ||
+      this.inOpeningAtmosphere() ||
       !!this.pendingPlacementWeapon ||
-      (this.draft?.isActive() ?? false);
-    const cardsActive = !!this.pendingPlacementWeapon || (this.draft?.isActive() ?? false);
+      (this.draft?.isActive() ?? false) ||
+      this.trainDeathSequenceActive;
+    const cardsActive =
+      !!this.pendingPlacementWeapon ||
+      (this.draft?.isActive() ?? false) ||
+      this.trainDeathSequenceActive;
+
+    const joyGameplay =
+      this.isMobileTouchLayout &&
+      !this.inOpeningAtmosphere() &&
+      !cardsActive;
+    this.virtualJoystick?.setEnabled(joyGameplay);
+    this.mobileRideRoot?.setVisible(joyGameplay);
 
     if (this.pendingPlacementWeapon && this.train && this.turrets) {
       const justPressed = ptr.isDown && !this.wasPointerDown;
@@ -969,13 +2103,29 @@ export class MainScene extends Phaser.Scene {
     }
 
     const ridingNow = this.riding?.isRiding() ?? false;
+    const joyY =
+      this.isMobileTouchLayout && this.virtualJoystick
+        ? this.virtualJoystick.getVectorY()
+        : 0;
+    this.player?.setMobileWalkAxes(0, 0);
+    if (this.isMobileTouchLayout && this.virtualJoystick && !ridingNow) {
+      this.player?.setMobileWalkAxes(
+        this.virtualJoystick.getVectorX(),
+        this.virtualJoystick.getVectorY(),
+      );
+    }
+
     const train = this.train;
-    const accelerateDown = this.keyAccelerate?.isDown ?? false;
-    const brakeDown = this.keyBrake?.isDown ?? false;
-    const shouldCruise = !this.introCutsceneActive && !gameplayLocked && ridingNow;
+    const accelerateDown =
+      (this.keyAccelerate?.isDown ?? false) ||
+      (this.isMobileTouchLayout && ridingNow && joyY < -0.22);
+    const brakeDown =
+      (this.keyBrake?.isDown ?? false) ||
+      (this.isMobileTouchLayout && ridingNow && joyY > 0.22);
+    const shouldCruise = !this.inOpeningAtmosphere() && !gameplayLocked && ridingNow;
     this.train?.setCruising(shouldCruise);
     if (train) {
-      const throttle = this.introCutsceneActive
+      const throttle = this.inOpeningAtmosphere()
         ? 0
         : (shouldCruise && accelerateDown)
           ? 1
@@ -985,16 +2135,41 @@ export class MainScene extends Phaser.Scene {
       train.setThrottle(throttle);
     }
     this.train?.update(delta);
-    const trainScrollSpeed = this.introCutsceneActive
+    const trainScrollSpeed = this.inOpeningAtmosphere()
       ? this.introScrollSpeed
       : (train?.getSpeed() ?? 0);
     const trainScrollDy = (trainScrollSpeed * delta) / 1000;
+    if (
+      this.runStartedAtMs != null &&
+      train &&
+      !this.trainDeathSequenceActive &&
+      !this.mainMenuActive &&
+      !this.inOpeningAtmosphere()
+    ) {
+      this.trainTravelPx += trainScrollDy;
+    }
+    if (
+      !this.inOpeningAtmosphere() &&
+      !this.trainDeathSequenceActive &&
+      !gameplayLocked &&
+      train &&
+      ridingNow &&
+      trainScrollSpeed > MainScene.TRAIN_IDLE_MIN_SPEED
+    ) {
+      this.trainProgressThisSegmentPx += trainScrollDy;
+    }
     let bgScrollDy = 0;
-    if (train && trainScrollSpeed > 0) {
+    if (train && trainScrollSpeed > 0 && !this.trainDeathSequenceActive) {
       const speedRatio = trainScrollSpeed / Math.max(1, train.getMaxSpeed());
       const parallaxScale = 0.7 + speedRatio * 1.9;
       bgScrollDy = this.parallax?.update(delta, parallaxScale) ?? 0;
-      this.coalPickups?.addWorldOffset(0, trainScrollDy);
+      this.coalPickups?.addWorldOffset(0, bgScrollDy);
+      this.coalRechargeStations?.addWorldOffset(0, bgScrollDy);
+      this.goldenGoose?.addWorldOffset(0, bgScrollDy);
+      if (!this.inOpeningAtmosphere()) {
+        this.coalRechargeStations?.tryProgressSpawn(bgScrollDy, this.cameras.main);
+        this.goldenGoose?.tryProgressSpawn(bgScrollDy, this.cameras.main);
+      }
     }
     const coalOk = train?.hasCoal() ?? false;
 
@@ -1013,12 +2188,13 @@ export class MainScene extends Phaser.Scene {
       !this.hasShownFirstNightWarning &&
       nightStrength > this.nightWarningThreshold &&
       !this.introCutsceneActive &&
+      !this.mainMenuActive &&
       waveIsClear
     ) {
       this.hasShownFirstNightWarning = true;
       this.showNightWarningBubble();
     }
-    if (this.introCutsceneActive && train && waves) {
+    if (this.inOpeningAtmosphere() && train && waves) {
       this.turrets?.update(delta, train, waves, false, trainScrollSpeed);
     } else if (!cardsActive && train && waves) {
       waves.update(delta);
@@ -1028,15 +2204,8 @@ export class MainScene extends Phaser.Scene {
         waves.addEnemyWorldOffset(0, trainScrollDy);
       }
       const hulls = train.getHullRects();
-      const onTrainDamagedByEnemy = () => {
-        if (this.time.now >= this.nextTrainHitShakeAt) {
-          const s = MAIN_CAMERA_SHAKE_ON_TRAIN_HIT;
-          this.cameras.main.shake(s.durationMs, s.intensity, true);
-          this.nextTrainHitShakeAt = this.time.now + 120;
-        }
-      };
-      waves.updateEnemyProjectiles(delta, hulls, onTrainDamagedByEnemy);
-      waves.updateCollisions(hulls, onTrainDamagedByEnemy);
+      waves.updateEnemyProjectiles(delta, hulls);
+      waves.updateCollisions(hulls);
       const weaponFuel = this.turrets?.update(delta, train, waves, coalOk, trainScrollSpeed) ?? 0;
       if (weaponFuel > 0 && coalOk) {
         train.spendCoal(weaponFuel);
@@ -1045,7 +2214,13 @@ export class MainScene extends Phaser.Scene {
     }
 
     const player = this.player;
-    if (!this.introCutsceneActive && train && this.coalPickups && player) {
+    if (
+      !this.inOpeningAtmosphere() &&
+      train &&
+      this.coalPickups &&
+      player &&
+      !this.trainDeathSequenceActive
+    ) {
       // If riding, coal/exp is collected by train; player sprite is invisible and should not collect.
       const playerX = ridingNow ? -999999 : player.sprite.x;
       const playerY = ridingNow ? -999999 : player.sprite.y;
@@ -1058,20 +2233,49 @@ export class MainScene extends Phaser.Scene {
         train,
         1.0,
       );
+      const stationGained =
+        this.coalRechargeStations?.update(
+          playerX,
+          playerY,
+          MAIN_PLAYER_VISUAL.radius,
+          train,
+          !ridingNow,
+        ) ?? 0;
       if (fuelGained > 0) {
         this.showFuelGainText(player.sprite.x, player.sprite.y, fuelGained);
       }
+      if (stationGained > 0) {
+        this.showFuelGainText(player.sprite.x, player.sprite.y, stationGained);
+        this.showCoalRechargeDadBubble();
+      }
+      const gooseGain =
+        this.goldenGoose?.update(
+          delta,
+          playerX,
+          playerY,
+          MAIN_PLAYER_VISUAL.radius,
+          !ridingNow,
+        ) ?? 0;
+      if (gooseGain > 0) {
+        this.gooseScore += gooseGain;
+        this.showGooseScorePopup(player.sprite.x, player.sprite.y, gooseGain);
+      }
     }
 
-    if (!this.introCutsceneActive && train && this.hud) {
+    if (!this.inOpeningAtmosphere() && train && this.hud && !this.trainDeathSequenceActive) {
       this.hud.update(train, ridingNow, {
         level: this.playerLevel,
         currentExp: this.currentExp,
         expectedExp: this.expectedExp,
       });
     }
-    if (train?.isDestroyed) {
-      this.scene.start('GameOverScene');
+    if (
+      train?.isDestroyed &&
+      !this.trainDeathSequenceActive &&
+      !this.mainMenuActive &&
+      !this.introCutsceneActive
+    ) {
+      this.startTrainDeathSequence();
     }
     if (bgScrollDy > 0 && this.railSegments.length > 0) {
       const segmentH = this.railSegments[0]?.displayHeight ?? 256;

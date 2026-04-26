@@ -12,12 +12,13 @@ import type { TrainController } from './TrainController';
  */
 export class TrainRidingController {
   private riding = false;
+  private rideToggleQueued = false;
   private readonly rideOffset = new Phaser.Math.Vector2();
 
   constructor(
     private readonly train: TrainController,
     private readonly player: PlayerController,
-    private readonly keyRide: Phaser.Input.Keyboard.Key,
+    private readonly keyRide?: Phaser.Input.Keyboard.Key,
   ) {}
 
   isRiding(): boolean {
@@ -38,9 +39,17 @@ export class TrainRidingController {
     this.rideOffset.set(t.width * 0.5 + gap + r, 0);
   }
 
+  /** Touch / UI: same as tapping E once (mobile Board button). */
+  queueRideToggle(): void {
+    this.rideToggleQueued = true;
+  }
+
   /** Call before the train steps so cruise state matches the same frame. */
   processMountInput(): void {
-    if (!Phaser.Input.Keyboard.JustDown(this.keyRide)) return;
+    const keyPress =
+      !!this.keyRide && Phaser.Input.Keyboard.JustDown(this.keyRide);
+    if (!keyPress && !this.rideToggleQueued) return;
+    this.rideToggleQueued = false;
 
     if (this.riding) {
       this.riding = false;

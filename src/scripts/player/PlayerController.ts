@@ -19,17 +19,19 @@ const PLAYER_WALK_ANIM_KEY = 'player_walk';
 
 /**
  * Placeholder player (circle). Movement is manual (no Arcade body) so we can clamp to the
- * camera view and resolve the train hull analytically. Uses WASD.
+ * camera view and resolve the train hull analytically. WASD when available; optional touch axes from MainScene.
  */
 export class PlayerController {
   readonly sprite: Phaser.GameObjects.Arc | Phaser.GameObjects.Image | Phaser.GameObjects.Sprite;
   private readonly walkSpeed: number;
   private walkSpeedMultiplier = 1;
   private readonly radius: number;
-  private readonly keyW: Phaser.Input.Keyboard.Key;
-  private readonly keyA: Phaser.Input.Keyboard.Key;
-  private readonly keyS: Phaser.Input.Keyboard.Key;
-  private readonly keyD: Phaser.Input.Keyboard.Key;
+  private readonly keyW?: Phaser.Input.Keyboard.Key;
+  private readonly keyA?: Phaser.Input.Keyboard.Key;
+  private readonly keyS?: Phaser.Input.Keyboard.Key;
+  private readonly keyD?: Phaser.Input.Keyboard.Key;
+  private mobileAx = 0;
+  private mobileAy = 0;
   private facingLeft = false;
 
   constructor(scene: Phaser.Scene, options: PlayerControllerOptions) {
@@ -46,8 +48,8 @@ export class PlayerController {
       playerSprite.setDisplaySize(this.radius * 3.4, this.radius * 4.9);
       playerSprite.play(PLAYER_IDLE_ANIM_KEY);
       this.sprite = playerSprite;
-    } else if (scene.textures.exists('gosling_with_shadow')) {
-      const playerImage = scene.add.image(options.x, options.y, 'gosling_with_shadow');
+    } else if (scene.textures.exists('gosling_sheet')) {
+      const playerImage = scene.add.sprite(options.x, options.y, 'gosling_sheet', 0);
       playerImage.setDisplaySize(this.radius * 4.6, this.radius * 4.6);
       this.sprite = playerImage;
     } else {
@@ -58,13 +60,18 @@ export class PlayerController {
     this.sprite.setDepth(depth);
 
     const kb = scene.input.keyboard;
-    if (!kb) {
-      throw new Error('PlayerController requires keyboard input');
+    if (kb) {
+      this.keyW = kb.addKey(Phaser.Input.Keyboard.KeyCodes.W);
+      this.keyA = kb.addKey(Phaser.Input.Keyboard.KeyCodes.A);
+      this.keyS = kb.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+      this.keyD = kb.addKey(Phaser.Input.Keyboard.KeyCodes.D);
     }
-    this.keyW = kb.addKey(Phaser.Input.Keyboard.KeyCodes.W);
-    this.keyA = kb.addKey(Phaser.Input.Keyboard.KeyCodes.A);
-    this.keyS = kb.addKey(Phaser.Input.Keyboard.KeyCodes.S);
-    this.keyD = kb.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+  }
+
+  /** Virtual stick / touch axes in world space (−1..1); cleared when not driving from MainScene each frame. */
+  setMobileWalkAxes(ax: number, ay: number): void {
+    this.mobileAx = ax;
+    this.mobileAy = ay;
   }
 
   private ensureAnimations(scene: Phaser.Scene): void {
@@ -112,13 +119,20 @@ export class PlayerController {
   private readWalkAxes(): { ax: number; ay: number } {
     let vx = 0;
     let vy = 0;
-    if (this.keyA.isDown) vx -= 1;
-    if (this.keyD.isDown) vx += 1;
-    if (this.keyW.isDown) vy -= 1;
-    if (this.keyS.isDown) vy += 1;
+    if (this.keyA?.isDown) vx -= 1;
+    if (this.keyD?.isDown) vx += 1;
+    if (this.keyW?.isDown) vy -= 1;
+    if (this.keyS?.isDown) vy += 1;
     if (vx !== 0 && vy !== 0) {
       vx *= Math.SQRT1_2;
       vy *= Math.SQRT1_2;
+    }
+    vx += this.mobileAx;
+    vy += this.mobileAy;
+    const m = Math.hypot(vx, vy);
+    if (m > 1) {
+      vx /= m;
+      vy /= m;
     }
     return { ax: vx, ay: vy };
   }

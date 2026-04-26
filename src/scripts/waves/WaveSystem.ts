@@ -7,8 +7,9 @@ import type { Enemy } from '../enemy/Enemy';
 import { circleIntersectsCenteredRect } from '../enemy/circleRectIntersect';
 import { LongRangeEnemy } from '../enemy/LongRangeEnemy';
 import type { EnemyProjectileSpawn } from '../enemy/LongRangeEnemy';
-import { playBombTrainExplosionFx } from '../vfx/CollisionImpactVfx';
+import { playBombTrainExplosionFx, playCollision02ExplosionFx } from '../vfx/CollisionImpactVfx';
 import { getWaveConfig, type EnemyType } from './WaveConfiguration';
+import { MAIN_CAMERA_SHAKE_ON_TRAIN_HIT } from '../game/gameConfig';
 
 /**
  * WAVESYSTEM.TS - Manages Wave-Based Enemy Spawning and Progression
@@ -33,6 +34,8 @@ interface PendingEnemy {
   type: EnemyType;
   health: number;
   spawnTime: number;
+  /** Chunky / long_range bypass player-level gates (idle-penalty spawns + their respawns). */
+  ignoreLevelGate?: boolean;
 }
 
 export type WaveSystemState = 'spawning' | 'active' | 'completed' | 'between_waves';
@@ -40,8 +43,15 @@ export type WaveSystemState = 'spawning' | 'active' | 'completed' | 'between_wav
 export interface WaveSystemCallback {
   onWaveStarted?: (waveNumber: number, totalEnemies: number) => void;
   onWaveCompleted?: (waveNumber: number) => void;
-  onEnemyDestroyed?: (x: number, y: number, type: EnemyType) => void;
+  onEnemyDestroyed?: (
+    x: number,
+    y: number,
+    type: EnemyType,
+    source?: { trainRam?: boolean },
+  ) => void;
   onEnemyDespawned?: () => void;
+  /** Fired at the start of each endless batch (1-based index). */
+  onEndlessBatchEnqueued?: (batchIndex: number) => void;
 }
 
 export class WaveSystem {
@@ -87,13 +97,16 @@ export class WaveSystem {
   }> = [];
   
   private spawnCycle = 0;
-  
+  /** Extra spawn pressure when the train barely moved between endless batches (MainScene-driven). */
+  private trainIdleStacks = 0;
+
   // Config
   private enemySpawnInterval: number = 200; // ms between spawning each enemy
   private readonly maxAliveAtOnce = 13;
   private nightIntensity = 0;
   private slowFields: Array<{ x: number; y: number; radius: number; slowFactor: number }> = [];
   private spawningPaused = false;
+  private nextTrainImpactShakeAt = 0;
 
   constructor(
     scene: Phaser.Scene,
@@ -115,6 +128,15 @@ export class WaveSystem {
     this.difficultyMultiplier = difficultyMultiplier;
 
     this.initializeWave(1);
+  }
+
+  /** Camera feedback whenever the train loses HP to enemies (contact or long-range shells). */
+  private shakeOnTrainImpact(): void {
+    const now = this.scene.time.now;
+    if (now < this.nextTrainImpactShakeAt) return;
+    this.nextTrainImpactShakeAt = now + 65;
+    const s = MAIN_CAMERA_SHAKE_ON_TRAIN_HIT;
+    this.scene.cameras.main.shake(s.durationMs, s.intensity, true);
   }
 
   /**
@@ -150,19 +172,54 @@ export class WaveSystem {
 
   private enqueueNextEndlessBatch(): void {
     this.spawnCycle += 1;
+    const stacksBefore = this.trainIdleStacks;
+    this.callbacks.onEndlessBatchEnqueued?.(this.spawnCycle);
     const virtualWave = 1 + Math.floor(this.spawnCycle / 2);
     const waveConfig = getWaveConfig(virtualWave, this.difficultyMultiplier);
     this.enemySpawnInterval = waveConfig.spawnIntervalMs;
+    const idleCountMul = 1 + this.trainIdleStacks * 0.18;
+    const idleHealthMul = 1 + this.trainIdleStacks * 0.08;
+    let added = 0;
     for (const spec of waveConfig.baseEnemies) {
-      for (let i = 0; i < spec.count; i++) {
+      const count = Math.max(1, Math.ceil(spec.count * idleCountMul));
+      added += count;
+      for (let i = 0; i < count; i++) {
         this.pendingEnemies.push({
           type: spec.type,
-          health: this.getMaxHealthForType(spec.type),
+          health: Math.ceil(this.getMaxHealthForType(spec.type) * idleHealthMul),
           spawnTime: 0,
         });
       }
     }
-    this.totalEnemiesForWave += this.pendingEnemies.length;
+    const penaltyApplied = this.trainIdleStacks > stacksBefore;
+    if (penaltyApplied) {
+      const extras = this.buildIdleThreatPending(idleHealthMul);
+      for (const p of extras) {
+        this.pendingEnemies.push(p);
+      }
+      added += extras.length;
+    }
+    this.totalEnemiesForWave += added;
+  }
+
+  /** Extra chunky + long-range spawns when the train-idle penalty fires (ignores player level). */
+  private buildIdleThreatPending(idleHealthMul: number): PendingEnemy[] {
+    const hChunk = Math.ceil(this.getMaxHealthForType('chunky') * idleHealthMul);
+    const hLr = Math.ceil(this.getMaxHealthForType('long_range') * idleHealthMul);
+    return [
+      { type: 'chunky', health: hChunk, spawnTime: 0, ignoreLevelGate: true },
+      { type: 'long_range', health: hLr, spawnTime: 0, ignoreLevelGate: true },
+      { type: 'long_range', health: hLr, spawnTime: 0, ignoreLevelGate: true },
+    ];
+  }
+
+  /** Call when the player rode the train but barely advanced the world before the next endless batch. */
+  applyTrainIdlePressure(): void {
+    this.trainIdleStacks = Math.min(6, this.trainIdleStacks + 1);
+  }
+
+  decayTrainIdlePressure(): void {
+    this.trainIdleStacks = Math.max(0, this.trainIdleStacks - 1);
   }
 
   setNightIntensity(value: number): void {
@@ -178,8 +235,10 @@ export class WaveSystem {
   }
 
   private getCurrentSpawnIntervalMs(): number {
-    // Night spawns faster.
-    return Math.max(120, this.enemySpawnInterval * (1 - this.nightIntensity * 0.18));
+    // Night spawns faster; train-idle pressure spawns faster.
+    const night = 1 - this.nightIntensity * 0.18;
+    const idleFast = 1 / (1 + this.trainIdleStacks * 0.12);
+    return Math.max(120, this.enemySpawnInterval * night * idleFast);
   }
 
   private adjustHealthForNight(baseHealth: number): number {
@@ -200,6 +259,7 @@ export class WaveSystem {
   private resolveSpawnTypeAndHealth(
     type: EnemyType,
     health: number,
+    ignoreLevelGate = false,
   ): { type: EnemyType; health: number } {
     if (type === 'basic') {
       return {
@@ -208,19 +268,35 @@ export class WaveSystem {
       };
     }
     const level = this.getPlayerLevel();
-    if (type === 'chunky' && level < WaveSystem.CHUNKY_MIN_PLAYER_LEVEL) {
+    if (
+      type === 'chunky' &&
+      level < WaveSystem.CHUNKY_MIN_PLAYER_LEVEL &&
+      !ignoreLevelGate
+    ) {
       return {
         type: 'bomb',
         health: this.getMaxHealthForType('bomb'),
       };
     }
-    if (type === 'long_range' && level < WaveSystem.LONG_RANGE_MIN_PLAYER_LEVEL) {
+    if (
+      type === 'long_range' &&
+      level < WaveSystem.LONG_RANGE_MIN_PLAYER_LEVEL &&
+      !ignoreLevelGate
+    ) {
       return {
         type: 'bomb',
         health: this.getMaxHealthForType('bomb'),
       };
     }
     return { type, health };
+  }
+
+  private ignoreLevelGateForRespawnType(type: EnemyType): boolean {
+    const level = this.getPlayerLevel();
+    return (
+      (type === 'chunky' && level < WaveSystem.CHUNKY_MIN_PLAYER_LEVEL) ||
+      (type === 'long_range' && level < WaveSystem.LONG_RANGE_MIN_PLAYER_LEVEL)
+    );
   }
 
   private getMaxHealthForType(type: EnemyType): number {
@@ -308,6 +384,8 @@ export class WaveSystem {
           0, // trainContactCooldownMs
           Math.ceil(10 * cycleScale), // explosionDamage
           (commonRadius * 0.8) * 2, // explosionRadius
+          (bx, by) =>
+            this.callbacks.onEnemyDestroyed?.(bx, by, 'bomb', { trainRam: true }),
         );
         break;
       }
@@ -438,7 +516,11 @@ export class WaveSystem {
     ) {
       this.spawnAcc -= this.getCurrentSpawnIntervalMs();
       const pending = this.pendingEnemies.shift()!;
-      const { type, health } = this.resolveSpawnTypeAndHealth(pending.type, pending.health);
+      const { type, health } = this.resolveSpawnTypeAndHealth(
+        pending.type,
+        pending.health,
+        pending.ignoreLevelGate ?? false,
+      );
       this.spawnEnemy(type, this.adjustHealthForNight(health));
     }
 
@@ -453,10 +535,12 @@ export class WaveSystem {
         const pos = e.getPosition();
         if (this.isEnemyOffScreen(pos.x, pos.y)) {
           // Enemy despawned, add to respawn queue
+          const t = this.getEnemyType(e);
           this.respawnQueue.push({
-            type: this.getEnemyType(e),
+            type: t,
             health: e.getCurrentHealth(),
             spawnTime: 0,
+            ignoreLevelGate: this.ignoreLevelGateForRespawnType(t),
           });
           this.recycleEnemy(e);
           this.waveEnemies.splice(i, 1);
@@ -474,7 +558,11 @@ export class WaveSystem {
     ) {
       this.spawnAcc -= this.getCurrentSpawnIntervalMs();
       const respawning = this.respawnQueue.shift()!;
-      const { type, health } = this.resolveSpawnTypeAndHealth(respawning.type, respawning.health);
+      const { type, health } = this.resolveSpawnTypeAndHealth(
+        respawning.type,
+        respawning.health,
+        respawning.ignoreLevelGate ?? false,
+      );
       this.spawnEnemy(type, this.adjustHealthForNight(health));
     }
 
@@ -525,6 +613,7 @@ export class WaveSystem {
           )
         ) {
           this.train.takeDamage(p.damage);
+          this.shakeOnTrainImpact();
           onTrainDamaged?.();
           hit = true;
           break;
@@ -598,6 +687,7 @@ export class WaveSystem {
     wx: number,
     wy: number,
     extraVelY: number,
+    ignoreTypes?: readonly EnemyType[],
   ): {
     x: number;
     y: number;
@@ -613,6 +703,8 @@ export class WaveSystem {
     } | null = null;
     for (const e of this.waveEnemies) {
       if (!e.isAlive()) continue;
+      const type = this.getEnemyType(e);
+      if (ignoreTypes?.includes(type)) continue;
       const pos = e.getPosition();
       const dx = pos.x - wx;
       const dy = pos.y - wy;
@@ -633,6 +725,22 @@ export class WaveSystem {
     };
   }
 
+  /** Living enemies whose position lies inside the circle (for dome coal drain, etc.). */
+  countEnemiesInRadius(wx: number, wy: number, radius: number): number {
+    const rSq = radius * radius;
+    let n = 0;
+    for (const e of this.waveEnemies) {
+      if (!e?.isAlive()) continue;
+      const pos = e.getPosition();
+      const dx = pos.x - wx;
+      const dy = pos.y - wy;
+      if (dx * dx + dy * dy <= rSq) {
+        n += 1;
+      }
+    }
+    return n;
+  }
+
   /**
    * Find closest living enemy
    */
@@ -648,17 +756,21 @@ export class WaveSystem {
     hulls: Array<{ x: number; y: number; width: number; height: number }>,
     onTrainDamaged?: () => void,
   ): void {
+    const onHit = () => {
+      this.shakeOnTrainImpact();
+      onTrainDamaged?.();
+    };
     for (let i = this.waveEnemies.length - 1; i >= 0; i--) {
       const e = this.waveEnemies[i];
       if (!e || !e.isAlive()) continue;
-      const didDamage = e.handleTrainCollision(hulls, onTrainDamaged);
+      const didDamage = e.handleTrainCollision(hulls, onHit);
       if (!didDamage) continue;
       const type = this.getEnemyType(e);
       const pos = e.getPosition();
       playBombTrainExplosionFx(this.scene, pos.x, pos.y, { depth: 25, displayWidth: 120 });
       e.deactivateForPool();
       this.enemyPools[type].push(e);
-      this.callbacks.onEnemyDestroyed?.(pos.x, pos.y, type);
+      this.callbacks.onEnemyDestroyed?.(pos.x, pos.y, type, { trainRam: true });
       this.waveEnemies.splice(i, 1);
     }
   }
@@ -707,6 +819,42 @@ export class WaveSystem {
       p.y += dy;
       p.gfx.setPosition(p.x, p.y);
     }
+  }
+
+  /**
+   * Game over: living enemies currently in view pop with Collision 02 (no loot / callbacks).
+   */
+  explodeLivingEnemiesOnCameraWithCollision02(): void {
+    const cam = this.scene.cameras.main.worldView;
+    const margin = 56;
+    const hits: Array<{ enemy: Enemy; x: number; y: number }> = [];
+    for (const e of this.waveEnemies) {
+      if (!e?.isAlive()) continue;
+      const pos = e.getPosition();
+      if (
+        pos.x < cam.x - margin ||
+        pos.x > cam.x + cam.width + margin ||
+        pos.y < cam.y - margin ||
+        pos.y > cam.y + cam.height + margin
+      ) {
+        continue;
+      }
+      hits.push({ enemy: e, x: pos.x, y: pos.y });
+    }
+    hits.forEach((h, i) => {
+      this.scene.time.delayedCall(i * 55, () => {
+        playCollision02ExplosionFx(this.scene, h.x, h.y, {
+          depth: 54,
+          displayWidth: Phaser.Math.Between(118, 168),
+          msPerFrame: 40,
+        });
+      });
+      const idx = this.waveEnemies.indexOf(h.enemy);
+      if (idx >= 0) {
+        this.recycleEnemy(h.enemy);
+        this.waveEnemies.splice(idx, 1);
+      }
+    });
   }
 
   /**
