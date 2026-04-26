@@ -28,6 +28,7 @@ import { TrainController } from '../scripts/train/TrainController';
 import { TrainRidingController } from '../scripts/train/TrainRidingController';
 import { TrainTurretSystem, type WeaponType } from '../scripts/train/TrainTurretSystem';
 import { GameplayHud } from '../scripts/ui/GameplayHud';
+import { CreditsCutscene } from '../scripts/ui/CreditsCutscene';
 import {
   ensureGoldenGooseWalkAnimations,
   ensureSlowDomeShieldAnimation,
@@ -66,6 +67,9 @@ export class MainScene extends Phaser.Scene {
     controlsBg: Phaser.GameObjects.Rectangle;
     controlsTxt: Phaser.GameObjects.Text;
     controlsDecor: Phaser.GameObjects.Rectangle[];
+    creditsBg: Phaser.GameObjects.Rectangle;
+    creditsTxt: Phaser.GameObjects.Text;
+    creditsDecor: Phaser.GameObjects.Rectangle[];
     infoRoot: Phaser.GameObjects.Container;
     scrollMask: Phaser.GameObjects.Graphics;
     scrollInner: Phaser.GameObjects.Container;
@@ -85,6 +89,11 @@ export class MainScene extends Phaser.Scene {
   private menuLastPointerY = 0;
   private menuInputCleanup?: () => void;
   private menuStartCommitted = false;
+  private creditsCutsceneActive = false;
+  private creditsCutscene?: CreditsCutscene;
+  private creditsBackBg?: Phaser.GameObjects.Rectangle;
+  private creditsBackTxt?: Phaser.GameObjects.Text;
+  private creditsBackDecor: Phaser.GameObjects.Rectangle[] = [];
   private introDialogueIndex = 0;
   private introBubble?: Phaser.GameObjects.Container;
   private introBubbleText?: Phaser.GameObjects.Text;
@@ -412,6 +421,9 @@ export class MainScene extends Phaser.Scene {
     */
 
     this.events.once('shutdown', () => {
+      this.creditsCutscene?.destroy();
+      this.creditsCutscene = undefined;
+      this.destroyCreditsBackButton();
       this.menuInputCleanup?.();
       this.menuInputCleanup = undefined;
       this.engineSmoke?.stop();
@@ -1348,7 +1360,9 @@ export class MainScene extends Phaser.Scene {
           .setScrollFactor(0)
           .setDepth(depthBtns + 2);
         const fire = (): void => {
-          if (!this.mainMenuActive || this.menuStartCommitted) return;
+          if (!this.mainMenuActive || this.menuStartCommitted || this.creditsCutsceneActive) {
+            return;
+          }
           onClick();
         };
         bg.on('pointerup', fire);
@@ -1365,12 +1379,14 @@ export class MainScene extends Phaser.Scene {
         return { bg, txt, decor: [rivet, rivet2] };
       };
 
-      const startY = height * 0.72;
-      const controlsY = height * 0.825;
+      const startY = height * 0.675;
+      const controlsY = height * 0.755;
+      const creditsY = height * 0.835;
       const startPair = makeLocoButton(startY, 'Start', () => this.commitMenuStart());
       const controlsPair = makeLocoButton(controlsY, 'Controls & Info', () =>
         this.openMenuInfoPanel(),
       );
+      const creditsPair = makeLocoButton(creditsY, 'Credits', () => this.startCreditsCutscene());
 
       const shortIntro =
         'Steam through hostile country: mind your coal, shoot the scrap, patch the train between waves.';
@@ -1638,6 +1654,9 @@ Drive — Stick up / down for gas & brake`;
         controlsBg: controlsPair.bg,
         controlsTxt: controlsPair.txt,
         controlsDecor: controlsPair.decor,
+        creditsBg: creditsPair.bg,
+        creditsTxt: creditsPair.txt,
+        creditsDecor: creditsPair.decor,
         infoRoot,
         scrollMask,
         scrollInner,
@@ -1754,6 +1773,7 @@ Drive — Stick up / down for gas & brake`;
     this.menuInfoOpen = true;
     m.startBg.disableInteractive();
     m.controlsBg.disableInteractive();
+    m.creditsBg.disableInteractive();
     this.menuScrollY = 0;
     this.refreshMenuScrollMetrics();
     m.infoRoot.setVisible(true);
@@ -1772,6 +1792,9 @@ Drive — Stick up / down for gas & brake`;
         m.controlsBg,
         m.controlsTxt,
         ...m.controlsDecor,
+        m.creditsBg,
+        m.creditsTxt,
+        ...m.creditsDecor,
       ],
       alpha: 0,
       duration: 240,
@@ -1779,6 +1802,7 @@ Drive — Stick up / down for gas & brake`;
       onComplete: () => {
         m.startBg.disableInteractive();
         m.controlsBg.disableInteractive();
+        m.creditsBg.disableInteractive();
         [
           m.startBg,
           m.startTxt,
@@ -1786,6 +1810,9 @@ Drive — Stick up / down for gas & brake`;
           m.controlsBg,
           m.controlsTxt,
           ...m.controlsDecor,
+          m.creditsBg,
+          m.creditsTxt,
+          ...m.creditsDecor,
         ].forEach((o) => o.setVisible(false));
       },
     });
@@ -1811,12 +1838,16 @@ Drive — Stick up / down for gas & brake`;
         m.controlsBg,
         m.controlsTxt,
         ...m.controlsDecor,
+        m.creditsBg,
+        m.creditsTxt,
+        ...m.creditsDecor,
       ].forEach((o) => {
         o.setVisible(true);
         o.setAlpha(0);
       });
       m.startBg.setInteractive({ useHandCursor: true });
       m.controlsBg.setInteractive({ useHandCursor: true });
+      m.creditsBg.setInteractive({ useHandCursor: true });
     };
     if (!animate) {
       m.infoRoot.setVisible(false);
@@ -1834,12 +1865,16 @@ Drive — Stick up / down for gas & brake`;
         m.controlsBg,
         m.controlsTxt,
         ...m.controlsDecor,
+        m.creditsBg,
+        m.creditsTxt,
+        ...m.creditsDecor,
       ].forEach((o) => {
         o.setVisible(true);
         o.setAlpha(1);
       });
       m.startBg.setInteractive({ useHandCursor: true });
       m.controlsBg.setInteractive({ useHandCursor: true });
+      m.creditsBg.setInteractive({ useHandCursor: true });
       return;
     }
     this.tweens.add({
@@ -1863,6 +1898,9 @@ Drive — Stick up / down for gas & brake`;
         m.controlsBg,
         m.controlsTxt,
         ...m.controlsDecor,
+        m.creditsBg,
+        m.creditsTxt,
+        ...m.creditsDecor,
       ],
       alpha: 1,
       duration: 260,
@@ -1872,11 +1910,154 @@ Drive — Stick up / down for gas & brake`;
     });
   }
 
+  private startCreditsCutscene(): void {
+    if (!this.mainMenuActive || this.menuStartCommitted || this.creditsCutsceneActive) {
+      return;
+    }
+    if (this.menuInfoOpen) return;
+    const m = this.menuPanel;
+    const train = this.train;
+    if (!m || !train) return;
+
+    this.creditsCutsceneActive = true;
+    m.startBg.disableInteractive();
+    m.controlsBg.disableInteractive();
+    m.creditsBg.disableInteractive();
+
+    this.tweens.add({
+      targets: [
+        m.titles,
+        m.startBg,
+        m.startTxt,
+        ...m.startDecor,
+        m.controlsBg,
+        m.controlsTxt,
+        ...m.controlsDecor,
+        m.creditsBg,
+        m.creditsTxt,
+        ...m.creditsDecor,
+      ],
+      alpha: 0,
+      duration: 380,
+      ease: 'Sine.Out',
+      onComplete: () => {
+        if (!this.creditsCutsceneActive) return;
+        this.creditsCutscene?.destroy();
+        this.creditsCutscene = new CreditsCutscene(this, train);
+        this.createCreditsBackButton();
+      },
+    });
+  }
+
+  private createCreditsBackButton(): void {
+    this.destroyCreditsBackButton();
+    const { width, height } = this.scale;
+    const cx = width * 0.5;
+    const backY = height * 0.9;
+    const btnW = 288;
+    const btnH = 48;
+    const woodFill = 0x2c1810;
+    const woodHover = 0x3d2817;
+    const brass = 0xc9a227;
+    const depthBtns = 9600;
+
+    const bg = this.add
+      .rectangle(cx, backY, btnW, btnH, woodFill, 1)
+      .setStrokeStyle(3, brass, 1)
+      .setScrollFactor(0)
+      .setDepth(depthBtns)
+      .setInteractive({ useHandCursor: true });
+    const rivet = this.add
+      .rectangle(cx - btnW * 0.38, backY, 5, 5, brass, 0.85)
+      .setScrollFactor(0)
+      .setDepth(depthBtns + 1);
+    const rivet2 = this.add
+      .rectangle(cx + btnW * 0.38, backY, 5, 5, brass, 0.85)
+      .setScrollFactor(0)
+      .setDepth(depthBtns + 1);
+    const txt = this.add
+      .text(cx, backY, 'Back', {
+        fontFamily: 'Finger Paint, system-ui, Segoe UI, Roboto, sans-serif',
+        fontSize: '28px',
+        color: '#f5e6c8',
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(depthBtns + 2)
+      .setInteractive({ useHandCursor: true });
+
+    const goBack = (): void => {
+      if (this.creditsCutsceneActive) {
+        this.endCreditsCutscene();
+      }
+    };
+    const hoverBack = (over: boolean): void => {
+      bg.setFillStyle(over ? woodHover : woodFill);
+      rivet.setAlpha(over ? 1 : 0.85);
+      rivet2.setAlpha(over ? 1 : 0.85);
+    };
+    for (const o of [bg, txt]) {
+      o.on('pointerup', goBack);
+      o.on('pointerover', () => hoverBack(true));
+      o.on('pointerout', () => hoverBack(false));
+    }
+
+    this.creditsBackBg = bg;
+    this.creditsBackTxt = txt;
+    this.creditsBackDecor = [rivet, rivet2];
+  }
+
+  private destroyCreditsBackButton(): void {
+    this.creditsBackDecor.forEach((r) => r.destroy());
+    this.creditsBackDecor = [];
+    this.creditsBackBg?.destroy();
+    this.creditsBackBg = undefined;
+    this.creditsBackTxt?.destroy();
+    this.creditsBackTxt = undefined;
+  }
+
+  private endCreditsCutscene(): void {
+    if (!this.creditsCutsceneActive) return;
+    this.creditsCutsceneActive = false;
+    this.creditsCutscene?.destroy();
+    this.creditsCutscene = undefined;
+    this.destroyCreditsBackButton();
+
+    const m = this.menuPanel;
+    if (!m) return;
+
+    const restoreTargets: Array<
+      | Phaser.GameObjects.Container
+      | Phaser.GameObjects.Rectangle
+      | Phaser.GameObjects.Text
+    > = [
+      m.titles,
+      m.startBg,
+      m.startTxt,
+      ...m.startDecor,
+      m.controlsBg,
+      m.controlsTxt,
+      ...m.controlsDecor,
+      m.creditsBg,
+      m.creditsTxt,
+      ...m.creditsDecor,
+    ];
+    this.tweens.killTweensOf(restoreTargets);
+    restoreTargets.forEach((o) => {
+      o.setVisible(true);
+      o.setAlpha(1);
+    });
+    m.startBg.setInteractive({ useHandCursor: true });
+    m.controlsBg.setInteractive({ useHandCursor: true });
+    m.creditsBg.setInteractive({ useHandCursor: true });
+  }
+
   private destroyMainMenuPanel(): void {
     const m = this.menuPanel;
     if (!m) return;
     m.startDecor.forEach((o) => o.destroy());
     m.controlsDecor.forEach((o) => o.destroy());
+    m.creditsDecor.forEach((o) => o.destroy());
     m.backBg.destroy();
     m.backTxt.destroy();
     m.infoRoot.destroy();
@@ -1885,6 +2066,8 @@ Drive — Stick up / down for gas & brake`;
     m.startTxt.destroy();
     m.controlsBg.destroy();
     m.controlsTxt.destroy();
+    m.creditsBg.destroy();
+    m.creditsTxt.destroy();
     this.menuPanel = undefined;
     this.menuScrollY = 0;
     this.menuScrollMax = 0;
@@ -1894,6 +2077,7 @@ Drive — Stick up / down for gas & brake`;
 
   private commitMenuStart(): void {
     if (!this.mainMenuActive || this.menuStartCommitted) return;
+    if (this.creditsCutsceneActive) return;
     if (this.menuInfoOpen) return;
     this.menuStartCommitted = true;
     const m = this.menuPanel;
@@ -1907,6 +2091,9 @@ Drive — Stick up / down for gas & brake`;
         m.controlsBg,
         m.controlsTxt,
         ...m.controlsDecor,
+        m.creditsBg,
+        m.creditsTxt,
+        ...m.creditsDecor,
         m.infoRoot,
         m.backBg,
         m.backTxt,
@@ -2151,6 +2338,7 @@ Drive — Stick up / down for gas & brake`;
     } else {
       this.introPointerWasDown = false;
     }
+
     if (this.keyEsc && Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
       if (!this.mainMenuActive && this.introCutsceneActive) {
         this.finishIntroCutscene();
@@ -2363,6 +2551,10 @@ Drive — Stick up / down for gas & brake`;
           rail.y = topMost - segmentH + 1;
         }
       }
+    }
+
+    if (this.creditsCutsceneActive && this.creditsCutscene) {
+      this.creditsCutscene.update(delta, bgScrollDy);
     }
 
     // Gate overlays disabled for now.
