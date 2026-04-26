@@ -1,6 +1,7 @@
 import * as Phaser from 'phaser';
 import { Enemy } from './Enemy';
 import type { TrainController } from '../train/TrainController';
+import { playExplosionSfx } from '../audio/gameSfx';
 import { circleIntersectsCenteredRect } from './circleRectIntersect';
 import { playBombTrainExplosionFx } from '../vfx/CollisionImpactVfx';
 import { MAIN_CAMERA_SHAKE_ON_TRAIN_HIT } from '../game/gameConfig';
@@ -81,8 +82,6 @@ export class BombEnemy extends Enemy {
   private readonly _explosionRadius: number;
   private readonly onExplodedOnTrain?: (x: number, y: number) => void;
 
-  private explosionSound: Phaser.Sound.BaseSound | null = null;
-
   constructor(
     scene: Phaser.Scene,
     train: TrainController,
@@ -121,10 +120,6 @@ export class BombEnemy extends Enemy {
     this.explosionDamage = explosionDamage;
     this._explosionRadius = _explosionRadius;
     this.onExplodedOnTrain = onExplodedOnTrain;
-
-    if (scene.cache.audio.exists('Explosion_Sound')) {
-      this.explosionSound = scene.sound.add('Explosion_Sound', { volume: 0.4 });
-    }
   }
 
   update(deltaMs: number): void {
@@ -167,7 +162,7 @@ export class BombEnemy extends Enemy {
         const ey = this.sprite.y;
         this.train.takeDamage(this.explosionDamage);
 
-        this.explosionSound?.play();
+        playExplosionSfx(this.scene);
 
         const cam = this.scene.cameras.main;
         const s = MAIN_CAMERA_SHAKE_ON_TRAIN_HIT;
@@ -203,12 +198,6 @@ export class BombEnemy extends Enemy {
   getTrainContactCooldownMs(): number {
     return 0; // Not used for bomb enemies
   }
-
-    override destroy(): void {
-      this.explosionSound?.destroy();
-      this.explosionSound = null;
-      super.destroy();
-    }
 
   /**
    * Bomb enemies handle their own collision logic in update() method.

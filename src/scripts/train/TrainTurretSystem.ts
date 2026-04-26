@@ -92,8 +92,7 @@ export class TrainTurretSystem {
   private readonly weaponSoundCooldowns = new Map<WeaponType, number>();
   private static readonly WEAPON_SOUND_COOLDOWNS_MS: Partial<Record<WeaponType, number>> = {
     basic: 0,
-    sniper: 0,       // sniper fires slowly, no cooldown needed
-    shuriken: 120,   // 4 pellets per volley, throttle more
+    sniper: 0, // sniper fires slowly, no cooldown needed
     caterpillar: 0,
     slow_dome: 0,
   };
@@ -130,7 +129,6 @@ export class TrainTurretSystem {
     const soundKeys: Partial<Record<WeaponType, { key: string; volume: number }>> = {
       basic:       { key: 'weapon_sound_basic',       volume: 0.5 },
       sniper:      { key: 'weapon_sound_sniper',      volume: 0.7 },
-      shuriken:    { key: 'weapon_sound_shuriken',    volume: 0.45 },
       caterpillar: { key: 'weapon_sound_caterpillar', volume: 0.6 },
     };
     for (const [type, cfg] of Object.entries(soundKeys) as [WeaponType, { key: string; volume: number }][]) {
@@ -174,6 +172,12 @@ export class TrainTurretSystem {
       this.domes.push(null);
       this.fireAcc.push(0);
     }
+  }
+
+  /** One short shuriken hit per pellet; uses `sound.play` so volleys can overlap. */
+  private playShurikenPelletSfx(): void {
+    if (!this.scene.cache.audio.exists('weapon_sound_shuriken')) return;
+    this.scene.sound.play('weapon_sound_shuriken', { volume: 0.42, rate: 1.22 });
   }
 
   private playWeaponSound(type: WeaponType, deltaMs: number): void {
@@ -604,7 +608,9 @@ export class TrainTurretSystem {
       if ((this.fireAcc[i] ?? 0) < stats.interval) continue;
       this.fireAcc[i] = 0;
 
-      this.playWeaponSound(slot.type, deltaMs);
+      if (slot.type !== 'shuriken') {
+        this.playWeaponSound(slot.type, deltaMs);
+      }
 
       if (slot.type === 'sniper') {
         fuelSpent += TrainTurretSystem.COAL_PER_SNIPER_SHOT;
@@ -642,6 +648,9 @@ export class TrainTurretSystem {
 
       const pellets = Math.max(1, stats.pellets);
       for (let p = 0; p < pellets; p++) {
+        if (slot.type === 'shuriken') {
+          this.playShurikenPelletSfx();
+        }
         const shotAng =
           slot.type === 'shuriken'
             ? Phaser.Math.FloatBetween(-Math.PI, Math.PI)

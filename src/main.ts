@@ -17,6 +17,10 @@ new Phaser.Game({
   type: Phaser.AUTO,
   parent,
   backgroundColor: '#0d1117',
+  /** Web Audio decodes to AudioBuffer — loop points are gapless vs HTML5 `<audio>`. */
+  audio: {
+    disableWebAudio: false,
+  },
   loader: {
     baseURL: loaderBaseUrl,
   },

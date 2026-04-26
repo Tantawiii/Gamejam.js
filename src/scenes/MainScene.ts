@@ -178,7 +178,7 @@ export class MainScene extends Phaser.Scene {
   readonly cardPity = new CardPityState();
   private playerLevel = 1;
   private currentExp = 0;
-  private expectedExp = 1500;
+  private expectedExp = 500;
   private draftCount = 0;
   /** Cinematic train death: Collision 02 bursts, remove train, then You Died UI. */
   private trainDeathSequenceActive = false;
@@ -214,8 +214,14 @@ export class MainScene extends Phaser.Scene {
     this.cameras.main.fadeIn(300, 0, 0, 0);
 
     if (this.cache.audio.exists('bg_music')) {
-      this.bgMusic = this.sound.add('bg_music', { loop: true, volume: 0.3 });
+      this.bgMusic = this.sound.add('bg_music', { loop: true, volume: 0 });
       this.bgMusic.play();
+      this.tweens.add({
+        targets: this.bgMusic,
+        volume: 0.28,
+        duration: 1400,
+        ease: 'Sine.Out',
+      });
     }
 
     ensureSlowDomeShieldAnimation(this);

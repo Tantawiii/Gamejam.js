@@ -7,6 +7,7 @@ import type { Enemy } from '../enemy/Enemy';
 import { circleIntersectsCenteredRect } from '../enemy/circleRectIntersect';
 import { LongRangeEnemy } from '../enemy/LongRangeEnemy';
 import type { EnemyProjectileSpawn } from '../enemy/LongRangeEnemy';
+import { playExplosionSfx } from '../audio/gameSfx';
 import { playBombTrainExplosionFx, playCollision02ExplosionFx } from '../vfx/CollisionImpactVfx';
 import { getWaveConfig, type EnemyType } from './WaveConfiguration';
 import { rollEnemySpawnColors } from '../enemy/enemySpawnTint';
@@ -773,6 +774,7 @@ export class WaveSystem {
       if (!didDamage) continue;
       const type = this.getEnemyType(e);
       const pos = e.getPosition();
+      playExplosionSfx(this.scene);
       playBombTrainExplosionFx(this.scene, pos.x, pos.y, { depth: 25, displayWidth: 120 });
       e.deactivateForPool();
       this.enemyPools[type].push(e);

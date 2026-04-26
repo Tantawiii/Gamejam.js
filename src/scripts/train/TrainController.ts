@@ -50,7 +50,6 @@ export class TrainController {
   private readonly coalCfg: MainTrainCoalConfig;
 
   private movingSound: Phaser.Sound.BaseSound | null = null;
-  private wasChugging = false;
 
 
   /** Engine hull (camera follow, boarding, player ride offset). */
@@ -328,27 +327,23 @@ export class TrainController {
     const speedRatio = this.maxSpeed > 0 ? this.speed / this.maxSpeed : 0;
 
     if (isMoving) {
-      // Start playing only if fully stopped (not mid-fade-out)
       if (!this.movingSound.isPlaying) {
         sound.volume = 0;
         this.movingSound.play();
       }
-      this.wasChugging = true;
       const targetVolume = 0.35 + speedRatio * 0.65;
-      const targetDetune = speedRatio * 300;
+      /** Narrow detune range — large sweeps accentuate loop seams. */
+      const targetDetune = speedRatio * 90;
       sound.volume = Phaser.Math.Linear(sound.volume, targetVolume, dt * 5);
       if ('setDetune' in sound) {
-        (sound as any).setDetune(
-          Phaser.Math.Linear((sound as any).detune ?? 0, targetDetune, dt * 3)
+        (sound as Phaser.Sound.WebAudioSound).setDetune(
+          Phaser.Math.Linear((sound as Phaser.Sound.WebAudioSound).detune ?? 0, targetDetune, dt * 3),
         );
       }
-    } else if (this.wasChugging) {
-      // Fade out slowly — only stop + clear flag when fully silent
+    } else {
       sound.volume = Phaser.Math.Linear(sound.volume, 0, dt * 2);
       if (sound.volume < 0.01) {
         sound.volume = 0;
-        this.movingSound.stop();
-        this.wasChugging = false; // only reset AFTER fully faded
       }
     }
   }

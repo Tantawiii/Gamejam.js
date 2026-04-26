@@ -1,4 +1,5 @@
 import * as Phaser from 'phaser';
+import { playExplosionSfx } from '../audio/gameSfx';
 import { pushCircleOutOfCenteredRect } from '../player/circleRectPushOut';
 import type { TrainController } from '../train/TrainController';
 import { playStandardEnemyImpactFx } from '../vfx/CollisionImpactVfx';
@@ -213,6 +214,7 @@ export abstract class Enemy implements Damageable {
   ): void {
     const x = this.sprite.x;
     const y = this.sprite.y;
+    playExplosionSfx(this.scene);
     playStandardEnemyImpactFx(this.scene, x, y, { depth: this.sprite.depth + 10 });
     this.healthBar.clear();
     this.scene.tweens.add({
