@@ -24,7 +24,7 @@ export class MainMenuScene extends Phaser.Scene {
 
     const renderMenu = (): void => {
       this.add
-        .text(width / 2, height * 0.22, "Rails? WHAT'S DAT!", {
+        .text(width / 2, height * 0.22, "Choot Choot!", {
           fontFamily: 'Nosifer, system-ui, Segoe UI, Roboto, sans-serif',
           fontSize: '58px',
           color: '#ff3434',

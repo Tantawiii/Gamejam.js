@@ -41,7 +41,7 @@ export type MainTrainFleetConfig = {
 };
 
 export const MAIN_TRAIN_FLEET: MainTrainFleetConfig = {
-  carriageGap: 2,
+  carriageGap: -4,
   carriageWidth: 72,
   carriageHeight: 96,
   carriageFillColor: 0x654832,
@@ -73,7 +73,7 @@ export const MAIN_PLAYER_VIEW_PAD = 10;
 export const MAIN_PLAYER_OUTSIDE_TRAIN_GAP = 8;
 
 export const MAIN_PLAYER_VISUAL = {
-  radius: 11,
+  radius: 8,
   fillColor: 0x58a6ff,
   strokeColor: 0xffffff,
   strokeWidth: 2,

@@ -235,13 +235,27 @@ export class TrainController {
 
     for (let i = 1; i < this.parts.length; i++) {
       const r = this.parts[i]!.rect;
-      const ry = r.y - r.height * 0.5 - roofInset;
-      const hw = r.width * 0.38;
       const n = this.fleetCfg.carriageWeaponSlots;
-      for (let k = 0; k < n; k++) {
-        const t = n <= 1 ? 0.5 : k / (n - 1);
-        const x = r.x - hw + t * (2 * hw);
-        out.push(new Phaser.Math.Vector2(x, ry));
+      if (n === 4) {
+        // Align carriage mounts with the painted dot markers on the cart sprite.
+        const leftX = r.x - r.width * 0.2;
+        const rightX = r.x + r.width * 0.2;
+        const topY = r.y - r.height * 0.2;
+        const bottomY = r.y + r.height * 0.17;
+        out.push(
+          new Phaser.Math.Vector2(leftX, topY),
+          new Phaser.Math.Vector2(rightX, topY),
+          new Phaser.Math.Vector2(leftX, bottomY),
+          new Phaser.Math.Vector2(rightX, bottomY),
+        );
+      } else {
+        const ry = r.y - r.height * 0.5 - roofInset;
+        const hw = r.width * 0.38;
+        for (let k = 0; k < n; k++) {
+          const t = n <= 1 ? 0.5 : k / (n - 1);
+          const x = r.x - hw + t * (2 * hw);
+          out.push(new Phaser.Math.Vector2(x, ry));
+        }
       }
     }
 

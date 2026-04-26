@@ -170,8 +170,8 @@ export class TrainTurretSystem {
             (levelScale * this.attackSpeedMultiplier),
           bulletSpeed: 0,
           bulletLifeMs: 120,
-          range: this.firingRange * 1.55 * this.rangeMultiplier,
-          damage: 60 * levelScale * this.damageMultiplier,
+          range: this.firingRange * 2.4 * this.rangeMultiplier,
+          damage: 210 * levelScale * this.damageMultiplier,
           pellets: 1 as const,
           spreadRad: 0 as const,
           radiusScale: 1 as const,
@@ -185,7 +185,7 @@ export class TrainTurretSystem {
           bulletLifeMs: this.bulletLifeMs * 0.72,
           range: this.firingRange * 0.8 * this.rangeMultiplier,
           damage: 45 * levelScale * this.damageMultiplier,
-          pellets: 3 as const,
+          pellets: 4 as const,
           spreadRad: Phaser.Math.DegToRad(10),
           radiusScale: 1 as const,
         };
@@ -220,7 +220,8 @@ export class TrainTurretSystem {
   ): void {
     if (!slot) {
       gun.setTexture('weapon_basic');
-      gun.setAlpha(0.35);
+      gun.setAlpha(0);
+      gun.setVisible(false);
       return;
     }
     const keyMap: Record<WeaponType, string> = {
@@ -232,6 +233,7 @@ export class TrainTurretSystem {
     };
     gun.setTexture(keyMap[slot.type]);
     gun.setAlpha(1);
+    gun.setVisible(true);
     gun.setScale(1);
   }
 
@@ -367,13 +369,6 @@ export class TrainTurretSystem {
       this.rebuildFromTrain(train);
     }
 
-    // Get camera bounds
-    const cam = this.scene.cameras.main;
-    const camX = cam.worldView.x;
-    const camY = cam.worldView.y;
-    const camW = cam.worldView.width;
-    const camH = cam.worldView.height;
-
     for (let i = 0; i < this.guns.length; i++) {
       const gun = this.guns[i];
       const m = mounts[i];
@@ -386,50 +381,59 @@ export class TrainTurretSystem {
         m.y,
         trainScrollSpeedPxPerSec,
       );
-      if (!target) {
+      if (!target && slot.type !== 'shuriken') {
         continue;
       }
-
-      const { x: ex, y: ey, vx: evx, vy: evy, getHitPosition } = target;
-      const distance = Math.hypot(ex - m.x, ey - m.y);
       const stats = this.getWeaponStats(slot);
+      let distance = Number.POSITIVE_INFINITY;
+      let ang = gun.rotation - this.upFacingToWorldRotationOffset;
+      let aimX = m.x;
+      let aimY = m.y;
+      let getHitPosition: (() => { x: number; y: number }) | undefined;
 
-      let ang: number;
-      let aimX: number;
-      let aimY: number;
-      if (slot.type === 'slow_dome') {
-        ang = Math.atan2(ey - m.y, ex - m.x);
-        aimX = ex;
-        aimY = ey;
-      } else {
-        const leadSpeed =
-          slot.type === 'sniper'
-            ? 5200
-            : slot.type === 'caterpillar'
-              ? Math.max(140, Math.hypot(stats.bulletSpeed, 185))
-              : stats.bulletSpeed;
-        const lead = TrainTurretSystem.solveLinearLead(
-          m.x,
-          m.y,
-          ex,
-          ey,
-          evx,
-          evy,
-          leadSpeed,
+      if (slot.type === 'shuriken') {
+        const spinStep =
+          this.baseRotationSpeedRadPerSec * 1.35 * this.rotationSpeedMultiplier * (deltaMs / 1000);
+        gun.rotation += spinStep;
+        ang = gun.rotation - this.upFacingToWorldRotationOffset;
+      } else if (target) {
+        const { x: ex, y: ey, vx: evx, vy: evy, getHitPosition: targetHitPos } = target;
+        getHitPosition = targetHitPos;
+        distance = Math.hypot(ex - m.x, ey - m.y);
+        if (slot.type === 'slow_dome') {
+          ang = Math.atan2(ey - m.y, ex - m.x);
+          aimX = ex;
+          aimY = ey;
+        } else {
+          const leadSpeed =
+            slot.type === 'sniper'
+              ? 5200
+              : slot.type === 'caterpillar'
+                ? Math.max(140, Math.hypot(stats.bulletSpeed, 185))
+                : stats.bulletSpeed;
+          const lead = TrainTurretSystem.solveLinearLead(
+            m.x,
+            m.y,
+            ex,
+            ey,
+            evx,
+            evy,
+            leadSpeed,
+          );
+          ang = lead.ang;
+          aimX = lead.x;
+          aimY = lead.y;
+        }
+        const desiredGunRotation = ang + this.upFacingToWorldRotationOffset;
+        const maxStep =
+          this.baseRotationSpeedRadPerSec *
+          this.rotationSpeedMultiplier *
+          (slot.type === 'sniper' ? 0.5 : 1) *
+          (deltaMs / 1000);
+        gun.setRotation(
+          Phaser.Math.Angle.RotateTo(gun.rotation, desiredGunRotation, maxStep),
         );
-        ang = lead.ang;
-        aimX = lead.x;
-        aimY = lead.y;
       }
-      const desiredGunRotation = ang + this.upFacingToWorldRotationOffset;
-      const maxStep =
-        this.baseRotationSpeedRadPerSec *
-        this.rotationSpeedMultiplier *
-        (slot.type === 'sniper' ? 0.5 : 1) *
-        (deltaMs / 1000);
-      gun.setRotation(
-        Phaser.Math.Angle.RotateTo(gun.rotation, desiredGunRotation, maxStep),
-      );
 
       if (slot.type === 'slow_dome') {
         if (!this.domes[i]) {
@@ -457,32 +461,24 @@ export class TrainTurretSystem {
       }
 
       // Weapon must finish aiming before it can fire.
-      const aimError = Math.abs(
-        Phaser.Math.Angle.Wrap(gun.rotation - desiredGunRotation),
-      );
-      if (aimError > this.aimToleranceRad) {
-        continue;
+      if (slot.type !== 'shuriken') {
+        const desiredGunRotation = ang + this.upFacingToWorldRotationOffset;
+        const aimError = Math.abs(
+          Phaser.Math.Angle.Wrap(gun.rotation - desiredGunRotation),
+        );
+        if (aimError > this.aimToleranceRad) {
+          continue;
+        }
       }
 
       // Only fire if target is within range AND on screen
-      if (distance > stats.range) {
+      if (slot.type !== 'shuriken' && distance > stats.range) {
         continue;
       }
-      const distanceToTrain = Phaser.Math.Distance.Between(
-        m.x,
-        m.y,
-        train.body.x,
-        train.body.y,
-      );
       if (
         (slot.type === 'sniper' || slot.type === 'caterpillar') &&
-        distanceToTrain < this.minLongRangeDistance
+        distance < this.minLongRangeDistance
       ) {
-        continue;
-      }
-
-      // Lead aim point should be on-screen (enemy may be off-screen but volley still gated by range)
-      if (aimX < camX || aimX > camX + camW || aimY < camY || aimY > camY + camH) {
         continue;
       }
 
@@ -509,16 +505,19 @@ export class TrainTurretSystem {
           const idx = this.sniperBeams.indexOf(beam);
           if (idx >= 0) this.sniperBeams.splice(idx, 1);
         });
-        const hp = getHitPosition();
-        enemies.tryHitEnemyWithBullet(hp.x, hp.y, 14, stats.damage);
+        if (getHitPosition) {
+          const hp = getHitPosition();
+          enemies.tryHitEnemyWithBullet(hp.x, hp.y, 14, stats.damage);
+        }
         continue;
       }
 
       const pellets = Math.max(1, stats.pellets);
       for (let p = 0; p < pellets; p++) {
-        const t = pellets <= 1 ? 0 : p / (pellets - 1);
-        const spread = (t - 0.5) * 2 * stats.spreadRad;
-        const shotAng = ang + spread;
+        const shotAng =
+          slot.type === 'shuriken'
+            ? Phaser.Math.FloatBetween(-Math.PI, Math.PI)
+            : ang + ((pellets <= 1 ? 0 : p / (pellets - 1)) - 0.5) * 2 * stats.spreadRad;
         const vx = Math.cos(shotAng) * stats.bulletSpeed;
         const vy = Math.sin(shotAng) * stats.bulletSpeed;
         const bulletKey =

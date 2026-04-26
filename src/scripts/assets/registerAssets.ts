@@ -16,6 +16,16 @@ export const ENEMY_SPRITESHEET_CONFIG = {
   frameHeight: 46,
 } as const;
 
+/**
+ * Player sheet layout:
+ * - Row 1: idle animation (6 frames)
+ * - Row 2: walk animation (8 frames)
+ */
+export const PLAYER_SPRITESHEET_CONFIG = {
+  frameWidth: 82,
+  frameHeight: 117,
+} as const;
+
 const RUINS_FILES = [
   'Blue-gray_ruins1.png',
   'Blue-gray_ruins2.png',
@@ -113,6 +123,11 @@ export function registerAssets(scene: Phaser.Scene): void {
   scene.load.image(
     'gosling_with_shadow',
     encodePublicAssetUrl('assets/Golden Goose/Gosling_with_shadow.png'),
+  );
+  scene.load.spritesheet(
+    'player_character_sheet',
+    encodePublicAssetUrl('assets/player/player .png'),
+    PLAYER_SPRITESHEET_CONFIG,
   );
   scene.load.image('train_engine_cart', encodePublicAssetUrl('assets/Train/Engine_Cart.png'));
   scene.load.image('train_back_cart', encodePublicAssetUrl('assets/Train/Back_Cart.png'));

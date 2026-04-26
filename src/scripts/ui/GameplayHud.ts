@@ -10,7 +10,7 @@ export class GameplayHud {
   private readonly scene: Phaser.Scene;
   private readonly gfx: Phaser.GameObjects.Graphics;
   private readonly hpBarText: Phaser.GameObjects.Text;
-  private readonly fuelBarText: Phaser.GameObjects.Text;
+  private readonly coalBarText: Phaser.GameObjects.Text;
   private readonly expBarText: Phaser.GameObjects.Text;
   private readonly cfg = MAIN_HUD_BARS;
   
@@ -53,7 +53,7 @@ export class GameplayHud {
       .setScrollFactor(0)
       .setDepth(5000);
 
-    this.fuelBarText = scene.add
+    this.coalBarText = scene.add
       .text(scene.scale.width * 0.5, 52, '', {
         fontFamily: 'system-ui, Segoe UI, Roboto, sans-serif',
         fontSize: '15px',
@@ -131,18 +131,19 @@ export class GameplayHud {
     const barHeight = 20;
     const hpX = Math.floor(this.scene.scale.width * 0.5 - barWidth * 0.5);
     const hpY = 18;
-    g.fillStyle(c.hpBg, 0.95);
+    g.fillStyle(c.hpBg, 0.48);
     g.fillRoundedRect(hpX, hpY, barWidth, barHeight, 6);
-    g.fillStyle(c.hpFg, 1);
+    g.fillStyle(c.hpFg, 0.74);
     g.fillRoundedRect(hpX, hpY, barWidth * Math.max(0, Math.min(1, hpFrac)), barHeight, 6);
     this.hpBarText.setPosition(this.scene.scale.width * 0.5, hpY + barHeight * 0.5);
     this.hpBarText.setText(`HP ${Math.ceil(train.health)}/${train.maxHealth}`);
+    this.hpBarText.setAlpha(0.82);
 
     const fuelX = hpX;
     const fuelY = hpY + barHeight + 8;
-    g.fillStyle(c.coalBg, 0.95);
+    g.fillStyle(c.coalBg, 0.48);
     g.fillRoundedRect(fuelX, fuelY, barWidth, barHeight, 6);
-    g.fillStyle(0x111111, 1);
+    g.fillStyle(0x111111, 0.74);
     g.fillRoundedRect(
       fuelX,
       fuelY,
@@ -150,16 +151,18 @@ export class GameplayHud {
       barHeight,
       6,
     );
-    this.fuelBarText.setPosition(this.scene.scale.width * 0.5, fuelY + barHeight * 0.5);
-    this.fuelBarText.setText(`Fuel ${Math.ceil(train.coal)}/${train.coalMax}`);
+    this.coalBarText.setPosition(this.scene.scale.width * 0.5, fuelY + barHeight * 0.5);
+    this.coalBarText.setText(`Coal ${Math.ceil(train.coal)}/${train.coalMax}`);
+    this.coalBarText.setAlpha(0.82);
 
     const expX = Math.floor(this.scene.scale.width * 0.5 - barWidth * 0.5);
     const expY = this.scene.scale.height - 36;
-    g.fillStyle(0x223042, 0.95);
+    g.fillStyle(0x223042, 0.48);
     g.fillRoundedRect(expX, expY, barWidth, barHeight, 6);
-    g.fillStyle(0x58a6ff, 1);
+    g.fillStyle(0x58a6ff, 0.74);
     g.fillRoundedRect(expX, expY, barWidth * Math.max(0, Math.min(1, expFrac)), barHeight, 6);
     this.expBarText.setPosition(this.scene.scale.width * 0.5, expY + barHeight * 0.5);
+    this.expBarText.setAlpha(0.82);
     this.expBarText.setText(
       `EXP Lv.${this.playerLevel} ${Math.floor(this.currentExp)}/${Math.floor(this.expectedExp)}`,
     );
@@ -169,7 +172,7 @@ export class GameplayHud {
     this.visible = on;
     this.gfx.setVisible(on);
     this.hpBarText.setVisible(on);
-    this.fuelBarText.setVisible(on);
+    this.coalBarText.setVisible(on);
     this.expBarText.setVisible(on);
     this.waveStartText?.setVisible(on);
     this.waveCompletedText?.setVisible(on);
@@ -236,7 +239,7 @@ export class GameplayHud {
   destroy(): void {
     this.gfx.destroy();
     this.hpBarText.destroy();
-    this.fuelBarText.destroy();
+    this.coalBarText.destroy();
     this.expBarText.destroy();
     this.waveStartText?.destroy();
     this.waveCompletedText?.destroy();

@@ -75,27 +75,27 @@ export class MainScene extends Phaser.Scene {
   private readonly introDialogue: Array<{ speaker: 'Dad' | 'Son'; text: string }> = [
     {
       speaker: 'Son',
-      text: "Dad, are we really living on this train now? This wasn't in my summer plans.",
+      text: 'Dad... are we seriously commuting through the apocalypse on a train?',
     },
     {
       speaker: 'Dad',
-      text: 'Temporary setup, kiddo. Rent is wild and rails are free if you keep moving.',
+      text: 'Post-Skynet housing market is brutal. Rails are free if killer drones do not catch us.',
     },
     {
       speaker: 'Son',
-      text: 'So our address is... wherever the smoke cloud points?',
+      text: 'So our home address is "Sector 9 Wasteland, moving target"?',
     },
     {
       speaker: 'Dad',
-      text: 'Exactly. Mobile office, mobile kitchen, mobile questionable parenting decisions.',
+      text: 'Exactly. Mobile bunker, mobile kitchen, and one highly questionable parenting AI policy.',
     },
     {
       speaker: 'Son',
-      text: 'If this turns into another "quick stop" adventure, I want hazard pay.',
+      text: 'If a chrome skull says "I will be back," I am hiding under the coal bin.',
     },
     {
       speaker: 'Dad',
-      text: 'Deal. For now, hang tight. Daddy has some work to do.',
+      text: 'Good instinct. Stay low, trust nobody with red eyes, and let me handle the tin cans.',
     },
   ];
 
@@ -121,7 +121,7 @@ export class MainScene extends Phaser.Scene {
       const r = 128;
       for (let i = r; i > 0; i -= 4) {
         const t = i / r;
-        g.fillStyle(0xffffff, 0.02 + t * 0.16);
+        g.fillStyle(0xffffff, 0.01 + t * 0.09);
         g.fillCircle(r, r, i);
       }
       g.generateTexture('night_light_stamp', r * 2, r * 2);
@@ -136,23 +136,26 @@ export class MainScene extends Phaser.Scene {
       .image(-9999, -9999, 'night_light_stamp')
       .setBlendMode(Phaser.BlendModes.ADD)
       .setAlpha(0)
-      .setScrollFactor(0)
+      .setScrollFactor(1)
       .setDepth(6801);
     this.playerNightLight = this.add
       .image(-9999, -9999, 'night_light_stamp')
       .setBlendMode(Phaser.BlendModes.ADD)
       .setAlpha(0)
-      .setScrollFactor(0)
+      .setScrollFactor(1)
       .setDepth(6802);
     if (this.textures.exists('rail_vertical')) {
       const frame = this.textures.getFrame('rail_vertical');
       const srcW = frame?.width ?? 96;
       const srcH = frame?.height ?? 256;
       const engineFrame = this.textures.getFrame('train_engine_cart');
-      const targetRailW = Math.max(60, Math.floor((engineFrame?.width ?? srcW) * 0.76));
+      const targetRailW = Math.max(52, Math.floor((engineFrame?.width ?? srcW) * 0.66));
       const railScale = targetRailW / srcW;
       const stepY = Math.max(1, srcH * railScale);
-      for (let y = -stepY; y <= this.scale.height + stepY; y += stepY) {
+      // Pre-spawn far above screen so aggressive zoom-out never reveals an empty top gap.
+      const upperSpawnY = -Math.max(this.scale.height * 3, stepY * 8);
+      const lowerSpawnY = this.scale.height + stepY * 2;
+      for (let y = upperSpawnY; y <= lowerSpawnY; y += stepY) {
         const rail = this.add
           .image(this.scale.width * 0.5, y, 'rail_vertical')
           .setScrollFactor(0)
@@ -317,10 +320,6 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
-    const cam = this.cameras.main;
-    const toScreenX = (wx: number) => wx - cam.worldView.x;
-    const toScreenY = (wy: number) => wy - cam.worldView.y;
-
     // Train light: ellipse from full fleet bounds (engine + all carriages).
     const hulls = train.getHullRects();
     let minX = Number.POSITIVE_INFINITY;
@@ -341,21 +340,21 @@ export class MainScene extends Phaser.Scene {
     const fleetCenterY = (minY + maxY) * 0.5;
     const fleetWidth = Math.max(1, maxX - minX);
     const fleetHeight = Math.max(1, maxY - minY);
-    trainLight.setPosition(toScreenX(fleetCenterX), toScreenY(fleetCenterY));
+    trainLight.setPosition(fleetCenterX, fleetCenterY);
     const stampSize = 256;
-    const trainLightW = fleetWidth * 1.12;
-    const trainLightH = fleetHeight * 1.12;
+    const trainLightW = fleetWidth * 1.34;
+    const trainLightH = fleetHeight * 1.24;
     trainLight.setScale(trainLightW / stampSize, trainLightH / stampSize);
-    trainLight.setAlpha(0.52 * lightStrength);
+    trainLight.setAlpha(0.33 * lightStrength);
 
     // On-foot light: circular lamp around player.
     const player = this.player?.sprite;
     if (!ridingNow && player) {
-      playerLight.setPosition(toScreenX(player.x), toScreenY(player.y));
-      const playerRadius = MAIN_PLAYER_VISUAL.radius * 2.3;
+      playerLight.setPosition(player.x, player.y);
+      const playerRadius = MAIN_PLAYER_VISUAL.radius * 2.1;
       const playerScale = (playerRadius * 2) / stampSize;
       playerLight.setScale(playerScale, playerScale);
-      playerLight.setAlpha(0.5 * lightStrength);
+      playerLight.setAlpha(0.28 * lightStrength);
     } else {
       playerLight.setAlpha(0);
     }
@@ -408,7 +407,7 @@ export class MainScene extends Phaser.Scene {
 
   private showFuelGainText(x: number, y: number, amount: number): void {
     const t = this.add
-      .text(x, y - 10, `+${Math.floor(amount)} Fuel`, {
+      .text(x, y - 10, `+${Math.floor(amount)} Coal`, {
         fontFamily: 'system-ui, Segoe UI, Roboto, sans-serif',
         fontSize: '17px',
         color: '#f2cc60',
@@ -462,6 +461,18 @@ export class MainScene extends Phaser.Scene {
     });
   }
 
+  private syncNightOverlayCoverage(): void {
+    const tint = this.nightTint;
+    if (!tint) return;
+    const zoomOutCoverageMultiplier = 3;
+    const w = this.scale.width * zoomOutCoverageMultiplier;
+    const h = this.scale.height * zoomOutCoverageMultiplier;
+    // Keep a large fixed overlay so even heavy zoom-out/camera transitions never expose edges.
+    tint.setPosition(-this.scale.width, -this.scale.height);
+    tint.setSize(w, h);
+    tint.setDisplaySize(w, h);
+  }
+
   private startCardDraft(): void {
     if (this.introCutsceneActive || !this.draft) return;
     const offers = this.rollCardOffers();
@@ -472,12 +483,15 @@ export class MainScene extends Phaser.Scene {
   private rollCardOffers(): CardOffer[] {
     const train = this.train;
     const turrets = this.turrets;
-    const firstDraftBoost = this.draftCount === 0 ? 0.99 : 0;
+    const canAddCart =
+      !!train && train.getCarriageCount() < train.getMaxCarriageCount();
+    const mustShowCartOnFirstDraft = this.draftCount === 0 && canAddCart;
+    const firstDraftBoost = mustShowCartOnFirstDraft ? 1 : 0;
     const cartOfferWeight = Math.max(
       firstDraftBoost,
       0.16 + this.cardPity.getCartOfferWeightBonus(),
     );
-    const includeCart = Math.random() < cartOfferWeight;
+    const includeCart = mustShowCartOnFirstDraft || Math.random() < cartOfferWeight;
     this.cardPity.recordCycle(includeCart);
     const pool: CardOffer[] = [
       {
@@ -513,13 +527,13 @@ export class MainScene extends Phaser.Scene {
       {
         id: 'train-fuel-max',
         label: 'Bigger Bunker',
-        description: '+35 max fuel and refill by 35.',
+        description: '+35 max coal and refill by 35.',
         kind: 'train',
       },
       {
         id: 'train-fuel-refill',
-        label: 'Fuel Depot',
-        description: 'Refill 70 fuel.',
+        label: 'Coal Depot',
+        description: 'Refill 70 coal.',
         kind: 'train',
       },
       {
@@ -588,7 +602,7 @@ export class MainScene extends Phaser.Scene {
         kind: 'weapon',
       },
     ];
-    if (includeCart && train && train.getCarriageCount() < train.getMaxCarriageCount()) {
+    if (includeCart && canAddCart) {
       pool.push({
         id: 'train-cart',
         label: 'New Cart',
@@ -602,6 +616,16 @@ export class MainScene extends Phaser.Scene {
       const idx = Phaser.Math.Between(0, pool.length - 1);
       const [card] = pool.splice(idx, 1);
       if (card) chosen.push(card);
+    }
+    if (mustShowCartOnFirstDraft && !chosen.some((c) => c.id === 'train-cart')) {
+      const replaceIdx = chosen.findIndex((c) => c.kind !== 'train');
+      const idxToReplace = replaceIdx >= 0 ? replaceIdx : Math.max(0, chosen.length - 1);
+      chosen[idxToReplace] = {
+        id: 'train-cart',
+        label: 'New Cart',
+        description: 'Add one carriage with fresh weapon slots.',
+        kind: 'train',
+      };
     }
     if (!turrets?.hasFreeSlot()) {
       this.addMissingWeaponFallback(chosen, pool);
@@ -802,10 +826,10 @@ export class MainScene extends Phaser.Scene {
     const arrowHeight = Math.floor(height / 4);
     const bubble = this.add.graphics({ x: 0, y: 0 });
 
-    bubble.fillStyle(0x222222, 0.5);
+    bubble.fillStyle(0x222222, 0.34);
     bubble.fillRoundedRect(6, 6, width, height, 16);
-    bubble.fillStyle(0xffffff, 1);
-    bubble.lineStyle(4, 0x565656, 1);
+    bubble.fillStyle(0xffffff, 0.58);
+    bubble.lineStyle(4, 0x565656, 0.72);
     bubble.strokeRoundedRect(0, 0, width, height, 16);
     bubble.fillRoundedRect(0, 0, width, height, 16);
 
@@ -819,10 +843,10 @@ export class MainScene extends Phaser.Scene {
     const point3X = point1X;
     const point3Y = height + arrowHeight;
 
-    bubble.lineStyle(4, 0x222222, 0.5);
+    bubble.lineStyle(4, 0x222222, 0.34);
     bubble.lineBetween(point2X - 1, point2Y + 6, point3X + 2, point3Y);
     bubble.fillTriangle(point1X, point1Y, point2X, point2Y, point3X, point3Y);
-    bubble.lineStyle(2, 0x565656, 1);
+    bubble.lineStyle(2, 0x565656, 0.72);
     bubble.lineBetween(point2X, point2Y, point3X, point3Y);
     bubble.lineBetween(point1X, point1Y, point3X, point3Y);
 
@@ -879,16 +903,25 @@ export class MainScene extends Phaser.Scene {
     if (added && this.train && this.turrets) {
       this.turrets.rebuildFromTrain(this.train);
       this.currentCameraZoom = Math.max(0.76, this.currentCameraZoom - 0.06);
+      const forceNightRefresh = () => {
+        const strength = this.computeNightStrength();
+        const ridingNow = this.riding?.isRiding() ?? false;
+        this.renderNightLighting(strength, ridingNow);
+      };
+      forceNightRefresh();
       this.tweens.add({
         targets: this.cameras.main,
         zoom: this.currentCameraZoom,
         duration: 260,
         ease: 'Sine.Out',
+        onUpdate: forceNightRefresh,
+        onComplete: forceNightRefresh,
       });
     }
   }
 
   override update(_time: number, delta: number): void {
+    this.syncNightOverlayCoverage();
     const cam = this.cameras.main;
     const ptr = this.input.activePointer;
     if (this.introCutsceneActive) {
