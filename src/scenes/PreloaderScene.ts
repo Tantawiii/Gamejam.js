@@ -1,5 +1,6 @@
 import * as Phaser from 'phaser';
 import { registerAssets } from '../scripts/assets/registerAssets';
+import { wavedashFromWindow } from '../scripts/wavedash/wavedashHost';
 
 export class PreloaderScene extends Phaser.Scene {
   constructor() {
@@ -30,7 +31,9 @@ export class PreloaderScene extends Phaser.Scene {
       .setOrigin(0, 0.5);
 
     this.load.on('progress', (value: number) => {
-      progressBar.width = Math.max(0, barWidth - 4) * Phaser.Math.Clamp(value, 0, 1);
+      const v = Phaser.Math.Clamp(value, 0, 1);
+      progressBar.width = Math.max(0, barWidth - 4) * v;
+      wavedashFromWindow()?.updateLoadProgressZeroToOne(v);
     });
 
     this.load.once('complete', () => {

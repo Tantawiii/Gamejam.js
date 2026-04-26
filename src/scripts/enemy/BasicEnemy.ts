@@ -117,8 +117,14 @@ export class BasicEnemy extends Enemy {
     }
   }
 
-  override resetForSpawn(x: number, y: number, health: number): void {
-    super.resetForSpawn(x, y, health);
+  override resetForSpawn(
+    x: number,
+    y: number,
+    health: number,
+    bodyTint?: number,
+    strokeTint?: number,
+  ): void {
+    super.resetForSpawn(x, y, health, bodyTint, strokeTint);
   }
 
   getRadius(): number {

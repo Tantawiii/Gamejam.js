@@ -78,6 +78,13 @@ export class CoalRechargeStationManager {
     this.sprite.setPosition(this.sprite.x + dx, this.sprite.y + dy);
   }
 
+  /** True if a station exists and overlaps the camera world view. */
+  isActiveInCamera(cam: Phaser.Cameras.Scene2D.Camera): boolean {
+    if (!this.sprite) return false;
+    const b = this.sprite.getBounds();
+    return Phaser.Geom.Rectangle.Overlaps(cam.worldView, b);
+  }
+
   /**
    * @returns Coal amount added to the train if the on-foot player is on the station.
    */
