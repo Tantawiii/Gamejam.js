@@ -95,6 +95,17 @@ export class GoldenGoosePickupManager {
     this.sprite.setPosition(this.sprite.x + dx, this.sprite.y + dy);
   }
 
+  hasSprite(): boolean {
+    return this.sprite != null;
+  }
+
+  /** True if the goose overlaps the camera world view (on-screen). */
+  isActiveInCamera(cam: Phaser.Cameras.Scene2D.Camera): boolean {
+    if (!this.sprite) return false;
+    const b = this.sprite.getBounds();
+    return Phaser.Geom.Rectangle.Overlaps(cam.worldView, b);
+  }
+
   /**
    * @returns Score awarded if the on-foot player touches the goose.
    */

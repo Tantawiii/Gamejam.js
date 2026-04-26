@@ -157,8 +157,14 @@ export class LongRangeEnemy extends Enemy {
     }
   }
 
-  override resetForSpawn(x: number, y: number, health: number): void {
-    super.resetForSpawn(x, y, health);
+  override resetForSpawn(
+    x: number,
+    y: number,
+    health: number,
+    bodyTint?: number,
+    strokeTint?: number,
+  ): void {
+    super.resetForSpawn(x, y, health, bodyTint, strokeTint);
     this.fireCooldownMs = Phaser.Math.Between(400, 1200);
   }
 

@@ -63,14 +63,17 @@ export function getWaveConfig(
   const baseConfigs: Record<number, EnemySpec[]> = {
     1: [
       { type: 'basic', count: 14 },
+      { type: 'chunky', count: 2 },
     ],
     2: [
       { type: 'basic', count: 18 },
+      { type: 'chunky', count: 3 },
       { type: 'long_range', count: 6 },
     ],
     3: [
       { type: 'basic', count: 18 },
       { type: 'bomb', count: 8 },
+      { type: 'chunky', count: 4 },
       { type: 'long_range', count: 8 },
     ],
     4: [

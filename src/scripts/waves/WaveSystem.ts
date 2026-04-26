@@ -9,6 +9,7 @@ import { LongRangeEnemy } from '../enemy/LongRangeEnemy';
 import type { EnemyProjectileSpawn } from '../enemy/LongRangeEnemy';
 import { playBombTrainExplosionFx, playCollision02ExplosionFx } from '../vfx/CollisionImpactVfx';
 import { getWaveConfig, type EnemyType } from './WaveConfiguration';
+import { rollEnemySpawnColors } from '../enemy/enemySpawnTint';
 import { MAIN_CAMERA_SHAKE_ON_TRAIN_HIT } from '../game/gameConfig';
 
 /**
@@ -60,9 +61,12 @@ export class WaveSystem {
   private static readonly CHUNKY_ENEMY_SPEED = 62 * 0.5;
   private static readonly LONG_RANGE_ENEMY_SPEED = 72;
   private static readonly ENEMY_PROJECTILE_TTL_MS = 9000;
-  /** Chunky enemies only spawn once the player reaches this level (1-based). */
+  /**
+   * Chunky enemies spawn only at or above this player level; below that, queued chunkies become bombs.
+   * (Must match WaveConfiguration comment / design.)
+   */
   private static readonly CHUNKY_MIN_PLAYER_LEVEL = 3;
-  /** Long-range enemies only spawn once the player reaches this level (1-based). */
+  /** Long-range: below this level, queued long_range spawn as bombs instead. */
   private static readonly LONG_RANGE_MIN_PLAYER_LEVEL = 5;
   private readonly scene: Phaser.Scene;
   private readonly train: TrainController;
@@ -334,9 +338,10 @@ export class WaveSystem {
    */
   private spawnEnemy(type: EnemyType, health: number): Enemy {
     const { x, y } = this.getSpawnPointAroundScreen();
+    const { body, stroke } = rollEnemySpawnColors(type);
     const pooled = this.enemyPools[type].pop();
     if (pooled) {
-      pooled.resetForSpawn(x, y, health);
+      pooled.resetForSpawn(x, y, health, body, stroke);
       this.waveEnemies.push(pooled);
       return pooled;
     }
@@ -426,6 +431,7 @@ export class WaveSystem {
       }
     }
 
+    enemy.applySpawnTint(body, stroke);
     this.waveEnemies.push(enemy);
     return enemy;
   }

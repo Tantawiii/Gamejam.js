@@ -154,12 +154,25 @@ export abstract class Enemy implements Damageable {
     onDestroyed?.(x, y);
   }
 
-  resetForSpawn(x: number, y: number, health: number): void {
+  /**
+   * @param bodyTint - Sprite multiply tint / circle fill; rolled per spawn in {@link WaveSystem}.
+   * @param strokeTint - Circle stroke; ignored for textured sprites (outline comes from art).
+   */
+  resetForSpawn(
+    x: number,
+    y: number,
+    health: number,
+    bodyTint?: number,
+    strokeTint?: number,
+  ): void {
     this.currentHealth = Math.max(1, Math.min(this.maxHealth, health));
     this.activeInWorld = true;
     this.sprite.setPosition(x, y);
     this.sprite.setAlpha(1);
     this.sprite.setVisible(true);
+    if (bodyTint !== undefined) {
+      this.applySpawnTint(bodyTint, strokeTint ?? bodyTint);
+    }
     if (this.sprite instanceof Phaser.GameObjects.Sprite) {
       const tk = this.sprite.texture.key;
       const animKey = Enemy.walkAnimKey(tk);
@@ -170,6 +183,17 @@ export abstract class Enemy implements Damageable {
     this.healthBar.setAlpha(1);
     this.healthBar.setVisible(true);
     this.updateHealthBarPosition();
+  }
+
+  /** Apply pooled or first-spawn palette (works for sprite tint and circle fallback). */
+  applySpawnTint(bodyTint: number, strokeTint: number): void {
+    if (this.sprite instanceof Phaser.GameObjects.Sprite) {
+      this.sprite.setTint(bodyTint);
+      return;
+    }
+    const arc = this.sprite as Phaser.GameObjects.Arc;
+    arc.setFillStyle(bodyTint, 1);
+    arc.setStrokeStyle(2, strokeTint);
   }
 
   deactivateForPool(): void {

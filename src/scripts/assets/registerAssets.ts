@@ -168,6 +168,15 @@ export function registerAssets(scene: Phaser.Scene): void {
       encodePublicAssetUrl(`assets/CollisionFX/Collision 02/${frame}.png`),
     );
   }
+
+  scene.load.image(
+    'train_smoke_frame_0',
+    encodePublicAssetUrl('assets/Smoke/smoke 1.png'),
+  );
+  scene.load.image(
+    'train_smoke_frame_1',
+    encodePublicAssetUrl('assets/Smoke/smoke 2.png'),
+  );
 }
 
 /** Directional walk cycles: rows 0–3 × 6 frames (down, up, right, left). */
