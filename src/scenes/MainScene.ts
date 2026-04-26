@@ -36,6 +36,7 @@ import {
 import { playCollision02ExplosionFx } from '../scripts/vfx/CollisionImpactVfx';
 import { TrainFurnaceSmoke } from '../scripts/vfx/TrainFurnaceSmoke';
 import { submitRunScoreToWavedash } from '../scripts/wavedash/wavedashLeaderboard';
+import { playUiButtonClick } from '../scripts/audio/gameSfx';
 
 /**
  * Starter scene — replace with your jam game.
@@ -1378,6 +1379,7 @@ export class MainScene extends Phaser.Scene {
         .setAlpha(0);
       const fire = (): void => {
         if (this.sys.settings.status !== Phaser.Scenes.RUNNING) return;
+        playUiButtonClick(this);
         onClick();
       };
       bg.on('pointerup', fire);
@@ -1512,6 +1514,7 @@ export class MainScene extends Phaser.Scene {
           if (!this.mainMenuActive || this.menuStartCommitted || this.creditsCutsceneActive) {
             return;
           }
+          playUiButtonClick(this);
           onClick();
         };
         bg.on('pointerup', fire);
@@ -1771,6 +1774,7 @@ Drive — Stick up / down for gas & brake`;
       };
       const fireBack = (): void => {
         if (!this.menuInfoOpen) return;
+        playUiButtonClick(this);
         this.closeMenuInfoPanel();
       };
       for (const o of [backBg, backTxt]) {
@@ -2137,6 +2141,7 @@ Drive — Stick up / down for gas & brake`;
 
     const goBack = (): void => {
       if (this.creditsCutsceneActive) {
+        playUiButtonClick(this);
         this.endCreditsCutscene();
       }
     };
@@ -2518,6 +2523,7 @@ Drive — Stick up / down for gas & brake`;
           this.train,
         );
         if (slot !== null) {
+          playUiButtonClick(this);
           this.turrets.placeWeaponAtSlot(slot, this.pendingPlacementWeapon);
           this.pendingPlacementWeapon = undefined;
           this.placementPrompt?.destroy();

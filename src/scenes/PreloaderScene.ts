@@ -1,5 +1,6 @@
 import * as Phaser from 'phaser';
-import { registerAssets } from '../scripts/assets/registerAssets';
+import { encodePublicAssetUrl, registerAssets } from '../scripts/assets/registerAssets';
+import { SFX_BUTTON_KEY, SFX_FOOTSTEP_KEY } from '../scripts/audio/gameSfx';
 import { wavedashFromWindow } from '../scripts/wavedash/wavedashHost';
 
 export class PreloaderScene extends Phaser.Scene {
@@ -42,13 +43,18 @@ export class PreloaderScene extends Phaser.Scene {
       this.scene.start('MainScene', { mainMenu: true });
     });
 
-    this.load.audio('train_chug', 'Sounds/trainChug.mp3');
-    this.load.audio('weapon_sound_basic',       'Sounds/weaponBasic.mp3');
-    this.load.audio('weapon_sound_sniper',      'Sounds/weaponSniper.mp3');
-    this.load.audio('weapon_sound_shuriken',    'Sounds/weaponShuriken.mp3');
-    this.load.audio('weapon_sound_caterpillar', 'Sounds/weaponCaterpillar.mp3');
+    this.load.audio('train_chug', encodePublicAssetUrl('Sounds/trainChug.mp3'));
+    this.load.audio('weapon_sound_basic', encodePublicAssetUrl('Sounds/weaponBasic.mp3'));
+    this.load.audio('weapon_sound_sniper', encodePublicAssetUrl('Sounds/weaponSniper.mp3'));
+    this.load.audio('weapon_sound_shuriken', encodePublicAssetUrl('Sounds/weaponShuriken.mp3'));
+    this.load.audio(
+      'weapon_sound_caterpillar',
+      encodePublicAssetUrl('Sounds/weaponCaterpillar.mp3'),
+    );
 
-    this.load.audio('bg_music', 'Sounds/bgMusic.mp3');
+    this.load.audio('bg_music', encodePublicAssetUrl('Sounds/bgMusic.mp3'));
+    this.load.audio(SFX_BUTTON_KEY, encodePublicAssetUrl('Sounds/button.mp3'));
+    this.load.audio(SFX_FOOTSTEP_KEY, encodePublicAssetUrl('Sounds/Footstep.mp3'));
 
     this.load.script(
       'webfont',

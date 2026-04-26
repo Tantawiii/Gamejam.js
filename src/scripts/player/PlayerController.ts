@@ -1,4 +1,5 @@
 import * as Phaser from 'phaser';
+import { playFootstep } from '../audio/gameSfx';
 import { pushCircleOutOfCenteredRect } from './circleRectPushOut';
 import { clampCircleToWorldView } from './worldBounds';
 
@@ -23,6 +24,7 @@ const PLAYER_WALK_ANIM_KEY = 'player_walk';
  */
 export class PlayerController {
   readonly sprite: Phaser.GameObjects.Arc | Phaser.GameObjects.Image | Phaser.GameObjects.Sprite;
+  private readonly scene: Phaser.Scene;
   private readonly walkSpeed: number;
   private walkSpeedMultiplier = 1;
   private readonly radius: number;
@@ -31,8 +33,11 @@ export class PlayerController {
   private readonly keyS?: Phaser.Input.Keyboard.Key;
   private readonly keyD?: Phaser.Input.Keyboard.Key;
   private facingLeft = false;
+  /** Time until next footstep while walking (ms). */
+  private footstepCooldownMs = 0;
 
   constructor(scene: Phaser.Scene, options: PlayerControllerOptions) {
+    this.scene = scene;
     this.radius = options.radius ?? 14;
     const fill = options.fillColor ?? 0x58a6ff;
     const stroke = options.strokeColor ?? 0xffffff;
@@ -164,6 +169,19 @@ export class PlayerController {
     const dt = deltaMs / 1000;
     const { ax, ay } = this.readWalkAxes();
     this.syncSpriteAnimation(ax, ay);
+
+    const moving = ax !== 0 || ay !== 0;
+    if (moving) {
+      this.footstepCooldownMs -= deltaMs;
+      if (this.footstepCooldownMs <= 0) {
+        playFootstep(this.scene);
+        const baseInterval = 340;
+        this.footstepCooldownMs =
+          baseInterval / Math.max(0.35, this.walkSpeedMultiplier);
+      }
+    } else {
+      this.footstepCooldownMs = 0;
+    }
 
     const speed = this.walkSpeed * this.walkSpeedMultiplier;
     let { x, y } = this.sprite;

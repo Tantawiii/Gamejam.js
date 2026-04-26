@@ -1,4 +1,5 @@
 import * as Phaser from 'phaser';
+import { playUiButtonClick } from '../audio/gameSfx';
 import type { WeaponType } from '../train/TrainTurretSystem';
 
 export type CardKind = 'player' | 'train' | 'weapon';
@@ -190,6 +191,7 @@ export class CardDraftSystem {
 
   private chooseCard(card: CardOffer): void {
     if (!this.active || !this.callbacks.canChooseCard(card)) return;
+    playUiButtonClick(this.scene);
     if (card.placementChoice && card.weaponType) {
       this.callbacks.onWeaponSlotResolution?.(card.placementChoice, card.weaponType);
       this.close();
