@@ -1,6 +1,7 @@
 import * as Phaser from 'phaser';
 
 /**
+ * @deprecated Unused — mobile touch controls are disabled in MainScene for now.
  * First touch on screen spawns a stick at that point; drag for −1..1 axes in screen space
  * (x right positive, y down positive — matches world walk when camera is axis-aligned).
  * Disabled while hidden: no capture, vector reads zero.

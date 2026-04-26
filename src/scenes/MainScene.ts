@@ -28,7 +28,6 @@ import { TrainController } from '../scripts/train/TrainController';
 import { TrainRidingController } from '../scripts/train/TrainRidingController';
 import { TrainTurretSystem, type WeaponType } from '../scripts/train/TrainTurretSystem';
 import { GameplayHud } from '../scripts/ui/GameplayHud';
-import { VirtualJoystick } from '../scripts/ui/VirtualJoystick';
 import {
   ensureGoldenGooseWalkAnimations,
   ensureSlowDomeShieldAnimation,
@@ -58,7 +57,7 @@ export class MainScene extends Phaser.Scene {
   private introCutsceneActive = false;
   /** Title screen: same world/parallax/train as gameplay, no dialogue yet. */
   private mainMenuActive = false;
-  /** Main menu widgets (title + hit-target buttons + info panel); avoids Container+Text input bugs. */
+  /** Main menu widgets; info panel body lives in a Container, but Back is scene-level like Start (Phaser input). */
   private menuPanel?: {
     titles: Phaser.GameObjects.Container;
     startBg: Phaser.GameObjects.Rectangle;
@@ -98,10 +97,6 @@ export class MainScene extends Phaser.Scene {
   private keyEsc?: Phaser.Input.Keyboard.Key;
   private keyAccelerate?: Phaser.Input.Keyboard.Key;
   private keyBrake?: Phaser.Input.Keyboard.Key;
-  /** Phone/tablet browsers (Phaser OS flag); enables touch stick + Board chip. */
-  private isMobileTouchLayout = false;
-  private virtualJoystick?: VirtualJoystick;
-  private mobileRideRoot?: Phaser.GameObjects.Container;
   private wasPointerDown = false;
   private nightTint?: Phaser.GameObjects.Rectangle;
   private trainHeadlightL?: Phaser.GameObjects.Image;
@@ -395,48 +390,15 @@ export class MainScene extends Phaser.Scene {
         this.resolveWeaponSlotChoice(mode, weaponType),
     });
 
-    this.isMobileTouchLayout = !this.sys.game.device.os.desktop;
-    if (this.isMobileTouchLayout) {
-      this.virtualJoystick = new VirtualJoystick(this);
-      const w = this.scale.width;
-      const h = this.scale.height;
-      const rx = w - 86;
-      const ry = h - 58;
-      const woodFill = 0x2c1810;
-      const woodHover = 0x3d2817;
-      const brass = 0xc9a227;
-      const rideBg = this.add
-        .rectangle(rx, ry, 118, 48, woodFill, 1)
-        .setStrokeStyle(3, brass, 1)
-        .setScrollFactor(0)
-        .setDepth(7600)
-        .setInteractive({ useHandCursor: true });
-      const rideTxt = this.add
-        .text(rx, ry, 'Board', {
-          fontFamily: 'Finger Paint, system-ui, Segoe UI, Roboto, sans-serif',
-          fontSize: '22px',
-          color: '#f5e6c8',
-        })
-        .setOrigin(0.5)
-        .setScrollFactor(0)
-        .setDepth(7601);
-      rideBg.on('pointerover', () => rideBg.setFillStyle(woodHover));
-      rideBg.on('pointerout', () => rideBg.setFillStyle(woodFill));
-      rideBg.on('pointerup', () => this.riding?.queueRideToggle());
-      this.mobileRideRoot = this.add
-        .container(0, 0, [rideBg, rideTxt])
-        .setScrollFactor(0)
-        .setDepth(7600)
-        .setVisible(false);
-    }
+    /* Mobile (disabled): import VirtualJoystick; add isMobileTouchLayout + virtualJoystick + mobileRideRoot fields;
+    set isMobileTouchLayout from device.os.desktop; create VirtualJoystick + Board chip container; destroy both on shutdown;
+    in update(): enable joystick + ride visibility when !openingAtmosphere && !cardsActive; feed stick to player walk +
+    W/S throttle while riding. Restore "Mobile controls" block in scheduleMainMenuOverlay (mobileBullets + subMob + mobT).
+    */
 
     this.events.once('shutdown', () => {
       this.menuInputCleanup?.();
       this.menuInputCleanup = undefined;
-      this.virtualJoystick?.destroy();
-      this.virtualJoystick = undefined;
-      this.mobileRideRoot?.destroy();
-      this.mobileRideRoot = undefined;
       this.engineSmoke?.stop();
       this.engineSmoke?.destroy();
       this.engineSmoke = undefined;
@@ -1401,10 +1363,12 @@ Throttle — W / S while you drive
 Click — Story, cards, place guns
 Esc — Skip intro`;
 
+      /* Mobile "Controls & Info" copy — disabled with touch UI.
       const mobileBullets = `Stick — Tap anywhere to spawn it; drag to move; lift to reset
 Cards — Stick sleeps while you pick; it wakes after
 Board — On-screen button (= E)
 Drive — Stick up / down for gas & brake`;
+      */
 
       const panelW = width * 0.88;
       const panelH = height * 0.82;
@@ -1498,14 +1462,15 @@ Drive — Stick up / down for gas & brake`;
       scrollContent.add(kbT);
       stackY += kbT.height + 16;
 
+      /* Mobile section (see mobileBullets block above)
       const subMob = this.add
         .text(subCenterX, stackY, 'Mobile controls', subStyle)
         .setOrigin(0.5, 0);
       scrollContent.add(subMob);
       stackY += subMob.height + 8;
-
       const mobT = this.add.text(innerPad, stackY, mobileBullets, bodyStyle).setOrigin(0, 0);
       scrollContent.add(mobT);
+      */
 
       const trackLeft = clipX + textColumnW + gap;
       const trackTop = clipY;
@@ -1529,23 +1494,41 @@ Drive — Stick up / down for gas & brake`;
         this.menuLastPointerY = pointer.y;
       });
 
+      const backScreenY = cy + backY;
       const backBg = this.add
-        .rectangle(0, backY, 176, backH, woodFill, 1)
+        .rectangle(cx, backScreenY, 176, backH, woodFill, 1)
         .setStrokeStyle(3, brass, 1)
+        .setScrollFactor(0)
+        .setDepth(depthInfo + 1)
         .setInteractive({ useHandCursor: true });
       const backTxt = this.add
-        .text(0, backY, 'Back', {
+        .text(cx, backScreenY, 'Back', {
           fontFamily:
             'Finger Paint, system-ui, Segoe UI, Roboto, sans-serif',
           fontSize: '26px',
           color: '#f5e6c8',
         })
-        .setOrigin(0.5);
-      const closeInfo = (): void => this.closeMenuInfoPanel();
-      backBg.on('pointerover', () => backBg.setFillStyle(woodHover));
-      backBg.on('pointerout', () => backBg.setFillStyle(woodFill));
-      backBg.on('pointerdown', closeInfo);
-      backBg.on('pointerup', closeInfo);
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(depthInfo + 2)
+        .setInteractive({ useHandCursor: true });
+      const hoverBack = (over: boolean): void => {
+        backBg.setFillStyle(over ? woodHover : woodFill);
+      };
+      const fireBack = (): void => {
+        if (!this.menuInfoOpen) return;
+        this.closeMenuInfoPanel();
+      };
+      for (const o of [backBg, backTxt]) {
+        o.on('pointerover', () => hoverBack(true));
+        o.on('pointerout', () => hoverBack(false));
+        o.on('pointerdown', fireBack);
+        o.on('pointerup', fireBack);
+      }
+      backBg.disableInteractive();
+      backTxt.disableInteractive();
+      backBg.setVisible(false);
+      backTxt.setVisible(false);
 
       infoRoot.add([
         panelBg,
@@ -1556,10 +1539,7 @@ Drive — Stick up / down for gas & brake`;
         scrollInner,
         track,
         thumb,
-        backBg,
-        backTxt,
       ]);
-      infoRoot.bringToTop(backTxt);
 
       this.menuPanel = {
         titles,
@@ -1677,10 +1657,18 @@ Drive — Stick up / down for gas & brake`;
     const m = this.menuPanel;
     if (!m || this.menuInfoOpen) return;
     this.menuInfoOpen = true;
+    m.startBg.disableInteractive();
+    m.controlsBg.disableInteractive();
     this.menuScrollY = 0;
     this.refreshMenuScrollMetrics();
     m.infoRoot.setVisible(true);
     m.infoRoot.setAlpha(0);
+    m.backBg.setVisible(true);
+    m.backTxt.setVisible(true);
+    m.backBg.setAlpha(0);
+    m.backTxt.setAlpha(0);
+    m.backBg.setInteractive({ useHandCursor: true });
+    m.backTxt.setInteractive({ useHandCursor: true });
     this.tweens.add({
       targets: [
         m.startBg,
@@ -1707,7 +1695,7 @@ Drive — Stick up / down for gas & brake`;
       },
     });
     this.tweens.add({
-      targets: m.infoRoot,
+      targets: [m.infoRoot, m.backBg, m.backTxt],
       alpha: 1,
       duration: 300,
       delay: 100,
@@ -1738,6 +1726,12 @@ Drive — Stick up / down for gas & brake`;
     if (!animate) {
       m.infoRoot.setVisible(false);
       m.infoRoot.setAlpha(0);
+      m.backBg.disableInteractive();
+      m.backTxt.disableInteractive();
+      m.backBg.setVisible(false);
+      m.backTxt.setVisible(false);
+      m.backBg.setAlpha(0);
+      m.backTxt.setAlpha(0);
       [
         m.startBg,
         m.startTxt,
@@ -1754,11 +1748,17 @@ Drive — Stick up / down for gas & brake`;
       return;
     }
     this.tweens.add({
-      targets: m.infoRoot,
+      targets: [m.infoRoot, m.backBg, m.backTxt],
       alpha: 0,
       duration: 220,
       ease: 'Sine.In',
-      onComplete: () => m.infoRoot.setVisible(false),
+      onComplete: () => {
+        m.infoRoot.setVisible(false);
+        m.backBg.disableInteractive();
+        m.backTxt.disableInteractive();
+        m.backBg.setVisible(false);
+        m.backTxt.setVisible(false);
+      },
     });
     this.tweens.add({
       targets: [
@@ -1782,6 +1782,8 @@ Drive — Stick up / down for gas & brake`;
     if (!m) return;
     m.startDecor.forEach((o) => o.destroy());
     m.controlsDecor.forEach((o) => o.destroy());
+    m.backBg.destroy();
+    m.backTxt.destroy();
     m.infoRoot.destroy();
     m.titles.destroy();
     m.startBg.destroy();
@@ -1811,6 +1813,8 @@ Drive — Stick up / down for gas & brake`;
         m.controlsTxt,
         ...m.controlsDecor,
         m.infoRoot,
+        m.backBg,
+        m.backTxt,
       );
     }
     const finish = (): void => {
@@ -2053,9 +2057,7 @@ Drive — Stick up / down for gas & brake`;
       this.introPointerWasDown = false;
     }
     if (this.keyEsc && Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
-      if (this.mainMenuActive && this.menuInfoOpen) {
-        this.closeMenuInfoPanel();
-      } else if (!this.mainMenuActive && this.introCutsceneActive) {
+      if (!this.mainMenuActive && this.introCutsceneActive) {
         this.finishIntroCutscene();
       }
     }
@@ -2073,13 +2075,6 @@ Drive — Stick up / down for gas & brake`;
       !!this.pendingPlacementWeapon ||
       (this.draft?.isActive() ?? false) ||
       this.trainDeathSequenceActive;
-
-    const joyGameplay =
-      this.isMobileTouchLayout &&
-      !this.inOpeningAtmosphere() &&
-      !cardsActive;
-    this.virtualJoystick?.setEnabled(joyGameplay);
-    this.mobileRideRoot?.setVisible(joyGameplay);
 
     if (this.pendingPlacementWeapon && this.train && this.turrets) {
       const justPressed = ptr.isDown && !this.wasPointerDown;
@@ -2103,25 +2098,10 @@ Drive — Stick up / down for gas & brake`;
     }
 
     const ridingNow = this.riding?.isRiding() ?? false;
-    const joyY =
-      this.isMobileTouchLayout && this.virtualJoystick
-        ? this.virtualJoystick.getVectorY()
-        : 0;
-    this.player?.setMobileWalkAxes(0, 0);
-    if (this.isMobileTouchLayout && this.virtualJoystick && !ridingNow) {
-      this.player?.setMobileWalkAxes(
-        this.virtualJoystick.getVectorX(),
-        this.virtualJoystick.getVectorY(),
-      );
-    }
 
     const train = this.train;
-    const accelerateDown =
-      (this.keyAccelerate?.isDown ?? false) ||
-      (this.isMobileTouchLayout && ridingNow && joyY < -0.22);
-    const brakeDown =
-      (this.keyBrake?.isDown ?? false) ||
-      (this.isMobileTouchLayout && ridingNow && joyY > 0.22);
+    const accelerateDown = this.keyAccelerate?.isDown ?? false;
+    const brakeDown = this.keyBrake?.isDown ?? false;
     const shouldCruise = !this.inOpeningAtmosphere() && !gameplayLocked && ridingNow;
     this.train?.setCruising(shouldCruise);
     if (train) {
