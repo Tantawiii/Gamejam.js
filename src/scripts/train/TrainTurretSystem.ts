@@ -87,6 +87,17 @@ export class TrainTurretSystem {
   private static readonly COAL_PER_BASIC_SHOT = 1;
   private static readonly COAL_PER_SHURIKEN_VOLLEY = 2;
 
+  // ADD this:
+  private readonly weaponSounds = new Map<WeaponType, Phaser.Sound.BaseSound>();
+  private readonly weaponSoundCooldowns = new Map<WeaponType, number>();
+  private static readonly WEAPON_SOUND_COOLDOWNS_MS: Partial<Record<WeaponType, number>> = {
+    basic: 0,
+    sniper: 0,       // sniper fires slowly, no cooldown needed
+    shuriken: 120,   // 4 pellets per volley, throttle more
+    caterpillar: 0,
+    slow_dome: 0,
+  };
+
   /**
    * Most weapon/bullet sprites are drawn facing up.
    * `bullet_basic` and `bullet_sniper` are drawn facing up-right (north-east).
@@ -115,6 +126,18 @@ export class TrainTurretSystem {
     this.bulletLifeMs = options.bulletLifeMs;
     this.depth = options.depth;
     this.firingRange = options.firingRange ?? 500; // Default 500 pixel range
+
+    const soundKeys: Partial<Record<WeaponType, { key: string; volume: number }>> = {
+      basic:       { key: 'weapon_sound_basic',       volume: 0.5 },
+      sniper:      { key: 'weapon_sound_sniper',      volume: 0.7 },
+      shuriken:    { key: 'weapon_sound_shuriken',    volume: 0.45 },
+      caterpillar: { key: 'weapon_sound_caterpillar', volume: 0.6 },
+    };
+    for (const [type, cfg] of Object.entries(soundKeys) as [WeaponType, { key: string; volume: number }][]) {
+      if (scene.cache.audio.exists(cfg.key)) {
+        this.weaponSounds.set(type, scene.sound.add(cfg.key, { volume: cfg.volume }));
+      }
+    }
   }
 
   rebuildFromTrain(train: TrainController): void {
@@ -151,6 +174,20 @@ export class TrainTurretSystem {
       this.domes.push(null);
       this.fireAcc.push(0);
     }
+  }
+
+  private playWeaponSound(type: WeaponType, deltaMs: number): void {
+    const sound = this.weaponSounds.get(type);
+    if (!sound) return;
+
+    const cooldownMs = TrainTurretSystem.WEAPON_SOUND_COOLDOWNS_MS[type] ?? 80;
+    const current = this.weaponSoundCooldowns.get(type) ?? 0;
+    const remaining = Math.max(0, current - deltaMs);
+    this.weaponSoundCooldowns.set(type, remaining);
+
+    if (remaining > 0) return;
+    sound.play();
+    this.weaponSoundCooldowns.set(type, cooldownMs);
   }
 
   private getWeaponStats(slot: WeaponSlot) {
@@ -567,6 +604,8 @@ export class TrainTurretSystem {
       if ((this.fireAcc[i] ?? 0) < stats.interval) continue;
       this.fireAcc[i] = 0;
 
+      this.playWeaponSound(slot.type, deltaMs);
+
       if (slot.type === 'sniper') {
         fuelSpent += TrainTurretSystem.COAL_PER_SNIPER_SHOT;
       } else if (slot.type === 'caterpillar') {
@@ -720,5 +759,13 @@ export class TrainTurretSystem {
       b.graphic.destroy();
     }
     this.bullets.length = 0;
+
+    for (const sound of this.weaponSounds.values()) {
+      sound.destroy();
+    }
+    this.weaponSounds.clear();
+    this.weaponSoundCooldowns.clear();
   }
+
+
 }

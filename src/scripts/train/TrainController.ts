@@ -49,6 +49,10 @@ export class TrainController {
   private readonly fleetCfg: MainTrainFleetConfig;
   private readonly coalCfg: MainTrainCoalConfig;
 
+  private movingSound: Phaser.Sound.BaseSound | null = null;
+  private wasChugging = false;
+
+
   /** Engine hull (camera follow, boarding, player ride offset). */
   readonly body: Phaser.GameObjects.Rectangle;
 
@@ -96,6 +100,13 @@ export class TrainController {
     engine.setDepth(depth);
     this.parts.push({ rect: engine, sprite: engineSprite, isEngine: true });
     this.body = engine;
+
+    if (scene.cache.audio.exists('train_chug')) {
+      this.movingSound = scene.sound.add('train_chug', {
+        loop: true,
+        volume: 0,
+      });
+    }
   }
 
   /** Extra carriages below the engine (from card rewards). */
@@ -309,6 +320,42 @@ export class TrainController {
     return dx * dx + dy * dy <= this.boardingRadius * this.boardingRadius;
   }
 
+  private _updateMovementSound(dt: number): void {
+    if (!this.movingSound) return;
+
+    const isMoving = this.speed > 0.5; // threshold to avoid tiny-speed flicker
+    const sound = this.movingSound as Phaser.Sound.WebAudioSound | Phaser.Sound.HTML5AudioSound;
+
+    if (isMoving) {
+      if (!this.wasChugging) {
+        console.log('speed:', this.speed, 'sound exists:', !!this.movingSound);
+        if (!this.movingSound.isPlaying) this.movingSound.play();
+        this.wasChugging = true;
+      }
+      // Pitch up with speed (detune: 0 = normal, 300 = ~1.2x faster)
+      const speedRatio = this.maxSpeed > 0 ? this.speed / this.maxSpeed : 0;
+      const targetVolume = 0.4 + speedRatio * 0.6;     // 0.4 → 1.0
+      const targetDetune = speedRatio * 300;             // 0 → 300 cents
+      const lerpSpeed = dt * 4;
+
+      sound.volume = Phaser.Math.Linear(sound.volume, targetVolume, lerpSpeed);
+      if ('setDetune' in sound) {
+        (sound as any).setDetune(
+          Phaser.Math.Linear((sound as any).detune ?? 0, targetDetune, lerpSpeed)
+        );
+      }
+    } else {
+      if (this.wasChugging) {
+        // Fade out then stop
+        sound.volume = Phaser.Math.Linear(sound.volume, 0, dt * 3);
+        if (sound.volume < 0.01) {
+          this.movingSound.stop();
+          this.wasChugging = false;
+        }
+      }
+    }
+  }
+
   update(deltaMs: number): void {
     if (!this.movementEnabled || this.isDestroyed) {
       this.speed = 0;
@@ -346,9 +393,12 @@ export class TrainController {
     for (const part of this.parts) {
       part.sprite.setPosition(part.rect.x, part.rect.y);
     }
+
+      this._updateMovementSound(dt);
   }
 
   destroy(): void {
+    this.movingSound?.destroy();
     for (const p of this.parts) {
       p.sprite.destroy();
       p.rect.destroy();
