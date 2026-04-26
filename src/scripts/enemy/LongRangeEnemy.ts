@@ -187,6 +187,12 @@ export class LongRangeEnemy extends Enemy {
     return 500;
   }
 
+  override destroy(): void {
+    this.fireSound?.destroy();
+    this.fireSound = null;
+    super.destroy();
+  }
+
   override getAimVelocity(): { vx: number; vy: number } {
     const tx = this.train.body.x;
     const ty = this.train.body.y;

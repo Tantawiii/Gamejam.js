@@ -81,6 +81,8 @@ export class BombEnemy extends Enemy {
   private readonly _explosionRadius: number;
   private readonly onExplodedOnTrain?: (x: number, y: number) => void;
 
+  private explosionSound: Phaser.Sound.BaseSound | null = null;
+
   constructor(
     scene: Phaser.Scene,
     train: TrainController,
@@ -119,6 +121,10 @@ export class BombEnemy extends Enemy {
     this.explosionDamage = explosionDamage;
     this._explosionRadius = _explosionRadius;
     this.onExplodedOnTrain = onExplodedOnTrain;
+
+    if (scene.cache.audio.exists('Explosion_Sound')) {
+      this.explosionSound = scene.sound.add('Explosion_Sound', { volume: 0.4 });
+    }
   }
 
   update(deltaMs: number): void {
@@ -160,12 +166,16 @@ export class BombEnemy extends Enemy {
         const ex = this.sprite.x;
         const ey = this.sprite.y;
         this.train.takeDamage(this.explosionDamage);
+
+        this.explosionSound?.play();
+
         const cam = this.scene.cameras.main;
         const s = MAIN_CAMERA_SHAKE_ON_TRAIN_HIT;
         cam.shake(s.durationMs, s.intensity * 1.12, true);
         playBombTrainExplosionFx(this.scene, ex, ey, { depth: this.sprite.depth + 12 });
         this.currentHealth = 0; // Mark as dead
-        this.destroy((px, py) => this.onExplodedOnTrain?.(px, py));
+        this.onExplodedOnTrain?.(ex, ey);
+        this.destroy();
         return;
       }
     }
@@ -193,6 +203,12 @@ export class BombEnemy extends Enemy {
   getTrainContactCooldownMs(): number {
     return 0; // Not used for bomb enemies
   }
+
+    override destroy(): void {
+      this.explosionSound?.destroy();
+      this.explosionSound = null;
+      super.destroy();
+    }
 
   /**
    * Bomb enemies handle their own collision logic in update() method.
