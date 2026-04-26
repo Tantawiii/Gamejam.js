@@ -25,6 +25,8 @@ export class LongRangeEnemy extends Enemy {
 
   private fireCooldownMs = 0;
 
+  private fireSound: Phaser.Sound.BaseSound | null = null;
+
   /** Keep artillery on-screen; padding is world pixels inside the main camera view. */
   private clampToCameraView(pad: number): void {
     const cam = this.scene.cameras.main.worldView;
@@ -88,6 +90,10 @@ export class LongRangeEnemy extends Enemy {
     this.shotCooldownMs = 1700;
     this.shotDamage = 12;
     this.queueProjectile = queueProjectile;
+
+    if (scene.cache.audio.exists('enemy_shot')) {
+      this.fireSound = scene.sound.add('enemy_shot', { volume: 0.4 });
+    }
   }
 
   update(deltaMs: number): void {
@@ -153,6 +159,7 @@ export class LongRangeEnemy extends Enemy {
         vy,
         damage: this.shotDamage,
       });
+      this.fireSound?.play(); // ADD THIS
       this.fireCooldownMs = this.shotCooldownMs;
     }
   }

@@ -48,6 +48,8 @@ export class PreloaderScene extends Phaser.Scene {
     this.load.audio('weapon_sound_shuriken',    'Sounds/weaponShuriken.mp3');
     this.load.audio('weapon_sound_caterpillar', 'Sounds/weaponCaterpillar.mp3');
 
+    this.load.audio('enemy_shot', 'Sounds/EnemyShot.mp3');
+
     this.load.audio('bg_music', 'Sounds/bgMusic.mp3');
 
     this.load.script(
