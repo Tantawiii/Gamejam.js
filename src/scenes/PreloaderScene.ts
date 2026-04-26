@@ -52,6 +52,7 @@ export class PreloaderScene extends Phaser.Scene {
       encodePublicAssetUrl('Sounds/weaponCaterpillar.mp3'),
     );
 
+    this.load.audio('enemy_shot', encodePublicAssetUrl('Sounds/EnemyShot.mp3'));
     this.load.audio('bg_music', encodePublicAssetUrl('Sounds/bgMusic.mp3'));
     this.load.audio(SFX_BUTTON_KEY, encodePublicAssetUrl('Sounds/button.mp3'));
     this.load.audio(SFX_FOOTSTEP_KEY, encodePublicAssetUrl('Sounds/Footstep.mp3'));

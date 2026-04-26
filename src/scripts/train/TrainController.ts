@@ -323,35 +323,32 @@ export class TrainController {
   private _updateMovementSound(dt: number): void {
     if (!this.movingSound) return;
 
-    const isMoving = this.speed > 0.5; // threshold to avoid tiny-speed flicker
     const sound = this.movingSound as Phaser.Sound.WebAudioSound | Phaser.Sound.HTML5AudioSound;
+    const isMoving = this.speed > 0.5;
+    const speedRatio = this.maxSpeed > 0 ? this.speed / this.maxSpeed : 0;
 
     if (isMoving) {
-      if (!this.wasChugging) {
-        console.log('speed:', this.speed, 'sound exists:', !!this.movingSound);
-        if (!this.movingSound.isPlaying) this.movingSound.play();
-        this.wasChugging = true;
+      // Start playing only if fully stopped (not mid-fade-out)
+      if (!this.movingSound.isPlaying) {
+        sound.volume = 0;
+        this.movingSound.play();
       }
-      // Pitch up with speed (detune: 0 = normal, 300 = ~1.2x faster)
-      const speedRatio = this.maxSpeed > 0 ? this.speed / this.maxSpeed : 0;
-      const targetVolume = 0.4 + speedRatio * 0.6;     // 0.4 → 1.0
-      const targetDetune = speedRatio * 300;             // 0 → 300 cents
-      const lerpSpeed = dt * 4;
-
-      sound.volume = Phaser.Math.Linear(sound.volume, targetVolume, lerpSpeed);
+      this.wasChugging = true;
+      const targetVolume = 0.35 + speedRatio * 0.65;
+      const targetDetune = speedRatio * 300;
+      sound.volume = Phaser.Math.Linear(sound.volume, targetVolume, dt * 5);
       if ('setDetune' in sound) {
         (sound as any).setDetune(
-          Phaser.Math.Linear((sound as any).detune ?? 0, targetDetune, lerpSpeed)
+          Phaser.Math.Linear((sound as any).detune ?? 0, targetDetune, dt * 3)
         );
       }
-    } else {
-      if (this.wasChugging) {
-        // Fade out then stop
-        sound.volume = Phaser.Math.Linear(sound.volume, 0, dt * 3);
-        if (sound.volume < 0.01) {
-          this.movingSound.stop();
-          this.wasChugging = false;
-        }
+    } else if (this.wasChugging) {
+      // Fade out slowly — only stop + clear flag when fully silent
+      sound.volume = Phaser.Math.Linear(sound.volume, 0, dt * 2);
+      if (sound.volume < 0.01) {
+        sound.volume = 0;
+        this.movingSound.stop();
+        this.wasChugging = false; // only reset AFTER fully faded
       }
     }
   }
