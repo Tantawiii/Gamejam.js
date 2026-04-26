@@ -115,6 +115,8 @@ export class MainScene extends Phaser.Scene {
   private trainIdleWarningBanner?: Phaser.GameObjects.Container;
   /** Run stats: timer starts when intro dialogue ends. */
   private runStartedAtMs: number | null = null;
+
+  private bgMusic?: Phaser.Sound.BaseSound
   /** Distance the train has traveled (world scroll) after the intro; feeds score. */
   private trainTravelPx = 0;
   private killScore = 0;
@@ -209,6 +211,12 @@ export class MainScene extends Phaser.Scene {
 
   create(): void {
     this.cameras.main.fadeIn(300, 0, 0, 0);
+
+    if (this.cache.audio.exists('bg_music')) {
+      this.bgMusic = this.sound.add('bg_music', { loop: true, volume: 0.3 });
+      this.bgMusic.play();
+    }
+
     ensureSlowDomeShieldAnimation(this);
     ensureGoldenGooseWalkAnimations(this);
     this.parallax = new DownwardParallaxBackground(this, {
@@ -486,6 +494,8 @@ export class MainScene extends Phaser.Scene {
       this.dadGooseDinnerBubble = undefined;
       this.dadCoalPickupBubble?.destroy();
       this.dadCoalPickupBubble = undefined;
+      this.bgMusic?.destroy();
+      this.bgMusic = undefined;
     });
   }
 

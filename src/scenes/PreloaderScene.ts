@@ -48,6 +48,8 @@ export class PreloaderScene extends Phaser.Scene {
     this.load.audio('weapon_sound_shuriken',    'Sounds/weaponShuriken.mp3');
     this.load.audio('weapon_sound_caterpillar', 'Sounds/weaponCaterpillar.mp3');
 
+    this.load.audio('bg_music', 'Sounds/bgMusic.mp3');
+
     this.load.script(
       'webfont',
       'https://ajax.googleapis.com/ajax/libs/webfont/1.6.26/webfont.js',
