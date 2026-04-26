@@ -136,9 +136,9 @@ export const MAIN_WEAPON_VISUAL_DEPTH = 18;
 export const MAIN_ENGINE_SMOKE_DEPTH = 400;
 
 export const MAIN_CAMERA_SHAKE_ON_TRAIN_HIT = {
-  durationMs: 110,
-  /** Phaser 4 default shake intensity is ~0.05; keep noticeable for shells + rams. */
-  intensity: 0.055,
+  durationMs: 85,
+  /** Subtle feedback on train hits (was easy to overdo at ~0.05+). */
+  intensity: 0.028,
 } as const;
 
 export const MAIN_TURRET_SYSTEM = {

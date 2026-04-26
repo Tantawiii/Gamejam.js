@@ -162,7 +162,7 @@ export class BombEnemy extends Enemy {
         this.train.takeDamage(this.explosionDamage);
         const cam = this.scene.cameras.main;
         const s = MAIN_CAMERA_SHAKE_ON_TRAIN_HIT;
-        cam.shake(s.durationMs, s.intensity * 1.35, true);
+        cam.shake(s.durationMs, s.intensity * 1.12, true);
         playBombTrainExplosionFx(this.scene, ex, ey, { depth: this.sprite.depth + 12 });
         this.currentHealth = 0; // Mark as dead
         this.destroy((px, py) => this.onExplodedOnTrain?.(px, py));

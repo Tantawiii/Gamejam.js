@@ -202,6 +202,23 @@ export class MainScene extends Phaser.Scene {
       g.generateTexture('night_light_stamp', r * 2, r * 2);
       g.destroy();
     }
+    /** Tall wedge: narrow at bottom (lamp), wider toward top (−Y / forward along track). */
+    if (!this.textures.exists('night_light_beam')) {
+      const g = this.add.graphics({ x: 0, y: 0 });
+      const bw = 256;
+      const bh = 336;
+      const cx = bw * 0.5;
+      const step = 3;
+      for (let y = 0; y < bh; y += step) {
+        const t = y / (bh - 1);
+        const halfW = Phaser.Math.Linear(102, 16, t);
+        const a = (0.05 + t * 0.11) * (0.35 + 0.65 * t);
+        g.fillStyle(0xffffff, Phaser.Math.Clamp(a * 0.28, 0.008, 0.09));
+        g.fillRect(cx - halfW, y, halfW * 2, step);
+      }
+      g.generateTexture('night_light_beam', bw, bh);
+      g.destroy();
+    }
     this.nightTint = this.add
       .rectangle(0, 0, this.scale.width, this.scale.height, 0x05070d, 0)
       .setOrigin(0, 0)
@@ -209,7 +226,7 @@ export class MainScene extends Phaser.Scene {
       .setDepth(6800);
     const headlight = () =>
       this.add
-        .image(-9999, -9999, 'night_light_stamp')
+        .image(-9999, -9999, 'night_light_beam')
         .setBlendMode(Phaser.BlendModes.ADD)
         .setAlpha(0)
         .setScrollFactor(1)
@@ -288,9 +305,7 @@ export class MainScene extends Phaser.Scene {
     );
     this.currentCameraZoom = 1;
 
-    const keyRide = this.input.keyboard?.addKey(
-      Phaser.Input.Keyboard.KeyCodes.E,
-    );
+    const keyRide = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.E);
 
     this.riding = new TrainRidingController(train, player, keyRide ?? undefined);
     this.riding.setRiding(true);
@@ -462,19 +477,22 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
-    // Engine headlights: left/right "shoulders" ahead of center (sprite fronts upward).
+    // Engine headlights: beam texture anchored at cowcatcher; narrow near lamp, wider up the track.
     const eng = train.getEngineSprite();
     const ew = eng.displayWidth;
     const eh = eng.displayHeight;
     const side = ew * 0.26;
-    const forward = eh * 0.4;
+    const forward = eh * 0.44;
     hlL.setPosition(eng.x - side, eng.y - forward);
     hlR.setPosition(eng.x + side, eng.y - forward);
-    const stampSize = 256;
-    const beam = Math.min(ew * 0.62, 155);
-    const s = beam / stampSize;
-    hlL.setScale(s, s);
-    hlR.setScale(s, s);
+    const beamTexW = 256;
+    const beamTexH = 336;
+    const beamLen = Math.min(eh * 1.22, 268);
+    const beamSpan = Math.min(ew * 0.72, 200);
+    hlL.setOrigin(0.5, 1);
+    hlR.setOrigin(0.5, 1);
+    hlL.setScale(beamSpan / beamTexW, beamLen / beamTexH);
+    hlR.setScale(beamSpan / beamTexW, beamLen / beamTexH);
     const headAlpha = 0.4 * lightStrength;
     hlL.setAlpha(headAlpha);
     hlR.setAlpha(headAlpha);
@@ -484,7 +502,7 @@ export class MainScene extends Phaser.Scene {
     if (!ridingNow && player) {
       playerLight.setPosition(player.x, player.y);
       const playerRadius = MAIN_PLAYER_VISUAL.radius * 2.1;
-      const playerScale = (playerRadius * 2) / stampSize;
+      const playerScale = (playerRadius * 2) / 256;
       playerLight.setScale(playerScale, playerScale);
       playerLight.setAlpha(0.28 * lightStrength);
     } else {
@@ -1357,12 +1375,6 @@ export class MainScene extends Phaser.Scene {
       const shortIntro =
         'Steam through hostile country: mind your coal, shoot the scrap, patch the train between waves.';
 
-      const kbBullets = `Move — WASD
-Board — E
-Throttle — W / S while you drive
-Click — Story, cards, place guns
-Esc — Skip intro`;
-
       /* Mobile "Controls & Info" copy — disabled with touch UI.
       const mobileBullets = `Stick — Tap anywhere to spawn it; drag to move; lift to reset
 Cards — Stick sleeps while you pick; it wakes after
@@ -1370,9 +1382,10 @@ Board — On-screen button (= E)
 Drive — Stick up / down for gas & brake`;
       */
 
-      const panelW = width * 0.88;
-      const panelH = height * 0.82;
-      const margin = 18;
+      /* Full-viewport panel so the copy has maximum width/height and needs less scrolling. */
+      const panelW = width;
+      const panelH = height;
+      const margin = Math.max(10, Math.min(18, Math.round(Math.min(width, height) * 0.028)));
       const scrollTrackW = 14;
       const gap = 8;
       const textColumnW = panelW - margin * 2 - scrollTrackW - gap;
@@ -1380,10 +1393,10 @@ Drive — Stick up / down for gas & brake`;
       const innerW = textColumnW - innerPad * 2;
 
       const titleLineY = -panelH * 0.5 + margin;
-      const headerBlockH = 48;
+      const headerBlockH = 44;
       const scrollTop = titleLineY + headerBlockH;
-      const backH = 46;
-      const backGap = 16;
+      const backH = 44;
+      const backGap = 12;
       const backY = panelH * 0.5 - margin - backH * 0.5;
       const scrollBottom = backY - backH * 0.5 - backGap;
       const scrollH = Math.max(100, scrollBottom - scrollTop);
@@ -1456,11 +1469,87 @@ Drive — Stick up / down for gas & brake`;
         .text(subCenterX, stackY, 'Keyboard & mouse', subStyle)
         .setOrigin(0.5, 0);
       scrollContent.add(subKb);
-      stackY += subKb.height + 8;
+      stackY += subKb.height + 10;
 
-      const kbT = this.add.text(innerPad, stackY, kbBullets, bodyStyle).setOrigin(0, 0);
-      scrollContent.add(kbT);
-      stackY += kbT.height + 16;
+      const labelRowStyle: Phaser.Types.GameObjects.Text.TextStyle = {
+        fontFamily:
+          'Finger Paint, system-ui, Segoe UI, Roboto, sans-serif',
+        fontSize: '22px',
+        color: '#f5e6c8',
+        align: 'left',
+      };
+      const keyCapStyle: Phaser.Types.GameObjects.Text.TextStyle = {
+        fontFamily:
+          'Finger Paint, system-ui, Segoe UI, Roboto, sans-serif',
+        fontSize: '20px',
+        color: '#f5e6c8',
+        align: 'center',
+      };
+      const chipFill = 0x3d2817;
+      const rowH = 42;
+      const rowGap = 8;
+      const keyChipW = Math.min(118, Math.floor(innerW * 0.34));
+      const keyRightX = innerPad + innerW;
+
+      const keyRows: { label: string; key: string }[] = [
+        { label: 'Move up', key: 'W' },
+        { label: 'Move down', key: 'S' },
+        { label: 'Move left', key: 'A' },
+        { label: 'Move right', key: 'D' },
+        { label: 'Board train', key: 'E' },
+      ];
+
+      for (const row of keyRows) {
+        const labelGo = this.add
+          .text(innerPad, stackY, row.label, labelRowStyle)
+          .setOrigin(0, 0);
+        scrollContent.add(labelGo);
+        const kcx = keyRightX - keyChipW * 0.5;
+        const kcy = stackY + rowH * 0.5;
+        const keyBg = this.add
+          .rectangle(kcx, kcy, keyChipW, rowH - 8, chipFill, 1)
+          .setStrokeStyle(2, brass, 1);
+        const keyTxt = this.add.text(kcx, kcy, row.key, keyCapStyle).setOrigin(0.5, 0.5);
+        scrollContent.add(keyBg);
+        scrollContent.add(keyTxt);
+        stackY += rowH + rowGap;
+      }
+
+      const throttleNote = this.add
+        .text(
+          innerPad,
+          stackY,
+          'Throttle while driving — same keys as Move up / Move down (W and S).',
+          bodyStyle,
+        )
+        .setOrigin(0, 0);
+      scrollContent.add(throttleNote);
+      stackY += throttleNote.height + 12;
+
+      const clickNote = this.add
+        .text(
+          innerPad,
+          stackY,
+          'Click — story, draft cards, place guns on the train.',
+          bodyStyle,
+        )
+        .setOrigin(0, 0);
+      scrollContent.add(clickNote);
+      stackY += clickNote.height + 12;
+
+      const skipLabel = this.add
+        .text(innerPad, stackY, 'Skip intro', labelRowStyle)
+        .setOrigin(0, 0);
+      scrollContent.add(skipLabel);
+      const skcx = keyRightX - keyChipW * 0.5;
+      const skcy = stackY + rowH * 0.5;
+      const skipBg = this.add
+        .rectangle(skcx, skcy, keyChipW, rowH - 8, chipFill, 1)
+        .setStrokeStyle(2, brass, 1);
+      const skipTxt = this.add.text(skcx, skcy, 'Esc', keyCapStyle).setOrigin(0.5, 0.5);
+      scrollContent.add(skipBg);
+      scrollContent.add(skipTxt);
+      stackY += rowH + 16;
 
       /* Mobile section (see mobileBullets block above)
       const subMob = this.add
@@ -1621,6 +1710,12 @@ Drive — Stick up / down for gas & brake`;
     for (const ch of m.scrollContent.list) {
       if (ch instanceof Phaser.GameObjects.Text) {
         contentBottom = Math.max(contentBottom, ch.y + ch.height);
+      } else if (ch instanceof Phaser.GameObjects.Rectangle) {
+        const oy = ch.originY ?? 0.5;
+        contentBottom = Math.max(
+          contentBottom,
+          ch.y + ch.height * (1 - oy),
+        );
       }
     }
     const totalH = contentBottom + 10;
